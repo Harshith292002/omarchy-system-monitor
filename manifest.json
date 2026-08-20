@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "harshith.system-monitor",
+  "name": "System Monitor",
+  "version": "1.0.0",
+  "author": "Harshith",
+  "license": "MIT",
+  "homepage": "https://github.com/Harshith292002/omarchy-system-monitor",
+  "description": "A low-overhead system dashboard for the Omarchy bar.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "System Monitor",
+    "description": "CPU, memory, temperature, network, and disk activity.",
+    "category": "System",
+    "aliases": ["sysmon", "system-stats"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "barMode": "Adaptive",
+      "closedRefreshSec": 5,
+      "openRefreshSec": 2,
+      "warningPercent": 80,
+      "criticalPercent": 95,
+      "networkInterface": ""
+    },
+    "schema": [
+      { "key": "barMode", "type": "enum", "label": "Bar display", "options": ["Adaptive", "CPU", "Memory", "Both"], "defaultValue": "Adaptive" },
+      { "key": "closedRefreshSec", "type": "integer", "label": "Closed refresh interval (seconds)", "min": 2, "max": 60, "step": 1, "defaultValue": 5 },
+      { "key": "openRefreshSec", "type": "integer", "label": "Open refresh interval (seconds)", "min": 1, "max": 10, "step": 1, "defaultValue": 2 },
+      { "key": "warningPercent", "type": "integer", "label": "Warning threshold", "min": 50, "max": 95, "step": 1, "defaultValue": 80 },
+      { "key": "criticalPercent", "type": "integer", "label": "Critical threshold", "min": 60, "max": 100, "step": 1, "defaultValue": 95 },
+      { "key": "networkInterface", "type": "string", "label": "Network interface", "defaultValue": "", "description": "Leave empty to follow the default route." }
+    ]
+  }
+}
