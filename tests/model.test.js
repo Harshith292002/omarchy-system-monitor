@@ -89,11 +89,26 @@ test("repository does not ship machine-specific paths or secrets", () => {
     "Sparkline.qml",
     "discover-sensors.sh",
     "manifest.json",
-    "README.md"
+    "README.md",
+    ".github/workflows/validate.yml"
   ]
   for (const file of tracked) {
     const text = fs.readFileSync(path.join(root, file), "utf8")
     assert.doesNotMatch(text, /\/home\/[^/\s]+/)
     assert.doesNotMatch(text, /(api[_-]?key|password|secret|token)\s*[:=]/i)
+  }
+})
+
+test("repository ships marketplace and README preview images", () => {
+  const images = [
+    "preview.png",
+    "docs/screenshots/system-monitor-panel.png"
+  ]
+  const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+
+  for (const file of images) {
+    const contents = fs.readFileSync(path.join(root, file))
+    assert.deepEqual([...contents.subarray(0, 8)], pngSignature)
+    assert.ok(contents.length > 10_000, `${file} should contain a real preview`)
   }
 })
