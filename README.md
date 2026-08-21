@@ -8,9 +8,9 @@ A low-overhead dashboard for the Omarchy bar. System Monitor reads Linux
 metrics directly from `/proc` and `/sys`, so it stays responsive without a
 background daemon or telemetry service.
 
-![System Monitor open on an empty Omarchy workspace](preview.png)
+![System Monitor dashboard preview](preview.png)
 
-<p align="center"><sub>Live Omarchy capture; hostname and network interface label anonymized.</sub></p>
+<p align="center"><sub>Built from a live Omarchy capture; system identifiers anonymized.</sub></p>
 
 ## Highlights
 
