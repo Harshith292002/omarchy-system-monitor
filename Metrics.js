@@ -7,6 +7,18 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value))
 }
 
+// WidgetButton forwards tooltip strings to the shell's shared Text item,
+// which currently uses Qt's automatic rich-text detection. Escape markup at
+// that boundary so configuration-derived labels cannot become HTML there.
+function escapeMarkup(value) {
+  return String(value === undefined || value === null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+
 function parseCpu(raw, previous) {
   var lines = String(raw || "").split("\n")
   var snapshots = ({})
@@ -188,6 +200,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseDiscovery: parseDiscovery,
     parseFilesystem: parseFilesystem,
     peakValue: peakValue,
-    maximumPercent: maximumPercent
+    maximumPercent: maximumPercent,
+    escapeMarkup: escapeMarkup
   }
 }

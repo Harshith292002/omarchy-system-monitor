@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "Metrics.js" as Model
 
 Panel {
   id: root
@@ -178,9 +179,12 @@ Panel {
   }
 
   function tooltipText() {
+    // WidgetButton's shared tooltip only accepts a string and renders it with
+    // Text.AutoText, so neutralize markup before handing it configuration.
+    var interfaceName = Model.escapeMarkup(metrics.activeInterface)
     return [
       "CPU " + percent(metrics.cpuPercent) + " · RAM " + percent(metrics.memoryPercent) + " · " + temperatureText(),
-      "Load " + loadText() + (metrics.activeInterface !== "" ? " · " + metrics.activeInterface : ""),
+      "Load " + loadText() + (interfaceName !== "" ? " · " + interfaceName : ""),
       "Net ↓ " + formatRate(metrics.networkDownBps) + " ↑ " + formatRate(metrics.networkUpBps),
       "Disk R " + formatRate(metrics.diskReadBps) + " · W " + formatRate(metrics.diskWriteBps),
       "Right-click cycles display · Middle-click opens btop"
@@ -622,6 +626,7 @@ Panel {
     PanelSectionHeader {
       id: headingText
       text: title
+      textFormat: Text.PlainText
       foreground: root.foreground
       fontFamily: root.fontFamily
       elide: Text.ElideRight

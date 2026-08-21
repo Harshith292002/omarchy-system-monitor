@@ -50,6 +50,19 @@ test("network parser follows the selected interface counters", () => {
   assert.equal(Model.parseDefaultInterface("Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\nwlan0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0\n"), "wlan0")
 })
 
+test("configuration-derived labels cannot become rich text", () => {
+  const crafted = "<img src=\"https://example.invalid/pixel?x=1&y='2'\">"
+  assert.equal(
+    Model.escapeMarkup(crafted),
+    "&lt;img src=&quot;https://example.invalid/pixel?x=1&amp;y=&#39;2&#39;&quot;&gt;"
+  )
+
+  const qml = fs.readFileSync(path.join(root, "Panel.qml"), "utf8")
+  assert.match(qml, /Model\.escapeMarkup\(metrics\.activeInterface\)/)
+  assert.match(qml, /id: headingText[\s\S]{0,160}textFormat: Text\.PlainText/)
+  assert.doesNotMatch(qml, /" · " \+ metrics\.activeInterface/)
+})
+
 test("discovery parser maps sensor probe output into runtime paths", () => {
   const raw = [
     "cpu_temp\t/sys/class/hwmon/hwmon2/temp1_input",
@@ -66,7 +79,7 @@ test("manifest describes a public bar widget with configurable thresholds", () =
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"))
   assert.equal(manifest.schemaVersion, 1)
   assert.equal(manifest.id, "harshith.system-monitor")
-  assert.equal(manifest.version, "1.0.0")
+  assert.equal(manifest.version, "1.0.1")
   assert.equal(manifest.license, "MIT")
   assert.equal(manifest.homepage, "https://github.com/Harshith292002/omarchy-system-monitor")
   assert.equal(manifest.barWidget.defaultSection, "right")
