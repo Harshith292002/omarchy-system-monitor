@@ -16,6 +16,13 @@ background daemon or telemetry service.
 
 - Adaptive bar widget that can show CPU, memory, GPU, or both
 - Expandable dashboard for CPU, RAM, temperature, load, and uptime
+- Platform sensor section on Apple Silicon (Asahi): every labelled SMC
+  temperature and power rail, since no SoC die sensor exists there
+- Fan control on Apple Silicon (optional, via the `asahi-fanctl` helper):
+  live RPMs, SMC/Auto plus Quiet, Boost, Full, and custom heatpipe-power
+  curve presets
+- Bar `Temp` mode: heatpipe watts on Asahi (`HEAT`), package °C elsewhere
+  (`TEMP`); never selected by Adaptive
 - GPU utilization, temperature, and VRAM, with per-sensor vendor fallbacks
 - Two-minute CPU, memory, and GPU history with per-core utilization
 - Mirrored network throughput history on a shared scale
@@ -65,10 +72,17 @@ pressure. Warning and critical colors follow the active Omarchy theme.
 | Network throughput | `/proc/net/route`, `/proc/net/dev` |
 | Disk throughput | `/proc/diskstats` and `/sys/class/block` |
 | CPU temperature | `/sys/class/hwmon` (`coretemp`, `k10temp`, or `zenpower`) |
+| Platform sensors (Apple Silicon/Asahi) | `/sys/class/hwmon` (`macsmc_hwmon` labelled temps and power rails) |
 | GPU load, temperature, and VRAM | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `hwmon`, `mem_info_vram_*`) |
 | Filesystem capacity | `df -P -k -l -T` |
 
-Temperature is shown when a supported package sensor is available. Disk
+Temperature is shown when a supported package sensor is available. Apple
+Silicon Macs on Asahi have none — the SoC's die temperatures live in the PMU,
+not sysfs — so the headline tile there shows heatpipe power (the SMC's
+estimate of the watts the SoC is dissipating; it tracks the warmth you feel
+and drives the fan curves), the SENSORS section lists every labelled
+`macsmc_hwmon` reading, and the bar tint follows heatpipe watts and the
+hottest platform temperature. Disk
 activity aggregates physical devices and ignores loop, RAM, zram, floppy, and
 optical devices.
 
@@ -107,6 +121,52 @@ memory, which picks the discrete adapter on hybrid systems without hard-coding
 device identifiers. Two temperature-only cards in one machine — an Intel iGPU
 next to an Arc card, for instance — cannot currently be told apart, and the
 first is used.
+
+## Fan control (Apple Silicon, optional)
+
+On Asahi machines the panel grows a FANS section when the `asahi-fanctl`
+helper and its `asahi-fand` systemd daemon are installed. Nothing is
+required for the monitoring features — without the helper the section
+simply explains that control is unavailable.
+
+| Preset | Behavior |
+| --- | --- |
+| Auto | Fans are handed back to the SMC's automatic curve (Apple's firmware) |
+| Quiet | Idles at the fan minimum, ramps from 6 W, capped at ~65% of range |
+| Boost | Audible ~30% floor even at idle, 100% of range by 14 W |
+| Full | Maximum RPM |
+| Custom | Your own curve: RPM scales between two bounds as heatpipe power crosses a watt window, with an optional always-at-least floor |
+
+The presets are deliberately far apart — Quiet and Boost differ by more
+than 1200 RPM at idle. Live RPM rows show the effect of a preset change
+immediately. The sensors section charts the thermal headline (heatpipe
+watts on Asahi, package temperature elsewhere) over a two-minute window.
+
+### Heatpipe power (definition)
+
+On Apple Silicon under Asahi, **heatpipe power** is the SMC’s estimate of
+how many watts the SoC is dumping through its heatpipes. It is **not** die
+temperature (°C) and **not** chassis skin temperature — those die sensors
+are not exposed in sysfs. The HEAT tile and optional bar `Temp` mode show
+this value because it is the best available proxy for SoC thermal load and
+the same input the fan curves follow.
+
+Why heatpipe power and not CPU temperature: Asahi does not expose SoC die
+temperatures — they live in the PMU. The SMC's heatpipe power reading is an
+estimate of the heat the SoC is dissipating, which makes it the best
+available proxy for how hard the chip is working.
+
+Safety model, in order: any platform sensor at or above the critical
+threshold (default 70°C, `CRITICAL_TEMP_C` in `/etc/asahi-fand.conf`)
+forces maximum RPM and sends a notification; stopping or crashing the
+daemon hands every fan back to the SMC (`ExecStopPost`); and a suspend hook
+restores automatic control before sleep. While a preset other than Auto is
+active the SMC does **not** manage the fans — the bar widget tints to say
+so.
+
+The helper is invoked through a targeted sudoers rule
+(`NOPASSWD: /usr/local/bin/asahi-fanctl`); it validates every argument
+(mode whitelist, per-fan RPM bounds) before touching sysfs.
 
 ## Configure
 

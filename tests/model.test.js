@@ -75,7 +75,9 @@ test("discovery parser maps sensor probe output into runtime paths", () => {
     gpuTempPath: "",
     gpuVramUsedPath: "",
     gpuVramTotalPath: "",
-    devices: ["nvme0n1", "sda"]
+    devices: ["nvme0n1", "sda"],
+    platformSensors: [],
+    fans: []
   })
 })
 
@@ -93,6 +95,59 @@ test("discovery parser captures gpu sensor paths alongside cpu and disks", () =>
   assert.equal(parsed.gpuTempPath, "/sys/class/drm/card1/device/hwmon/hwmon1/temp1_input")
   assert.equal(parsed.gpuVramTotalPath, "/sys/class/drm/card1/device/mem_info_vram_total")
   assert.deepEqual(parsed.devices, ["nvme0n1"])
+  assert.deepEqual(parsed.platformSensors, [])
+  assert.deepEqual(parsed.fans, [])
+})
+
+test("discovery parser captures macsmc fan records with bounds", () => {
+  const raw = [
+    "fan\t/sys/class/hwmon/hwmon2/fan1_input\t1\tFan 1\t1200\t5779",
+    "fan\t/sys/class/hwmon/hwmon2/fan2_input\t2\tFan 2\t1200\t6241",
+    // Non-numeric bounds drop the record rather than half-parsing it.
+    "fan\t/sys/class/hwmon/hwmon2/fan3_input\t3\tBroken\tNaN\t0",
+    // A label containing a tab survives; bounds are the last two fields.
+    "fan\t/sys/class/hwmon/hwmon2/fan4_input\t4\tLeft\tRight\t1200\t6241"
+  ].join("\n")
+  assert.deepEqual(Model.parseDiscovery(raw).fans, [
+    { path: "/sys/class/hwmon/hwmon2/fan1_input", targetPath: "/sys/class/hwmon/hwmon2/fan1_target", index: 1, label: "Fan 1", min: 1200, max: 5779 },
+    { path: "/sys/class/hwmon/hwmon2/fan2_input", targetPath: "/sys/class/hwmon/hwmon2/fan2_target", index: 2, label: "Fan 2", min: 1200, max: 6241 },
+    { path: "/sys/class/hwmon/hwmon2/fan4_input", targetPath: "/sys/class/hwmon/hwmon2/fan4_target", index: 4, label: "Left\tRight", min: 1200, max: 6241 }
+  ])
+})
+
+test("discovery parser captures macsmc platform sensors with kind and label", () => {
+  const raw = [
+    "platform_sensor\t/sys/class/hwmon/hwmon2/temp1_input\ttemp\tNAND Flash Temperature",
+    "platform_sensor\t/sys/class/hwmon/hwmon2/power1_input\tpower\tTotal System Power",
+    "platform_sensor\t/sys/class/hwmon/hwmon2/temp2_input\ttemp\tBattery Hotspot",
+    // Unknown kinds are dropped rather than guessed at.
+    "platform_sensor\t/sys/class/hwmon/hwmon2/curr1_input\tcurr\tCharger Current",
+    // A label containing a tab survives: everything past the kind is the label.
+    "platform_sensor\t/sys/class/hwmon/hwmon2/power4_input\tpower\tHeatpipe\tPower",
+    // Malformed lines are skipped whole.
+    "platform_sensor\t/sys/class/hwmon/hwmon2/temp9_input\ttemp"
+  ].join("\n")
+  const parsed = Model.parseDiscovery(raw)
+  assert.equal(parsed.cpuTempPath, "")
+  assert.deepEqual(parsed.platformSensors, [
+    { path: "/sys/class/hwmon/hwmon2/temp1_input", kind: "temp", label: "NAND Flash Temperature" },
+    { path: "/sys/class/hwmon/hwmon2/power1_input", kind: "power", label: "Total System Power" },
+    { path: "/sys/class/hwmon/hwmon2/temp2_input", kind: "temp", label: "Battery Hotspot" },
+    { path: "/sys/class/hwmon/hwmon2/power4_input", kind: "power", label: "Heatpipe\tPower" }
+  ])
+})
+
+test("platform sensor values follow the hwmon ABI scale and reject junk", () => {
+  assert.equal(Model.parseSensorValue("38500", "temp"), 38.5)
+  assert.equal(Model.parseSensorValue("29970000", "power"), 29.97)
+  // Zero is a real reading (a rail at rest), not a missing one.
+  assert.equal(Model.parseSensorValue("0", "power"), 0)
+  assert.equal(Model.parseSensorValue("", "temp"), -1)
+  assert.equal(Model.parseSensorValue("   ", "temp"), -1)
+  assert.equal(Model.parseSensorValue(null, "temp"), -1)
+  assert.equal(Model.parseSensorValue("abc", "temp"), -1)
+  // Negative readings are not published by these sensors; treat as missing.
+  assert.equal(Model.parseSensorValue("-3", "temp"), -1)
 })
 
 test("gpu percent parser clamps to the 0-100 band and rejects missing readings", () => {
@@ -183,13 +238,14 @@ test("manifest describes a public bar widget with configurable thresholds", () =
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"))
   assert.equal(manifest.schemaVersion, 1)
   assert.equal(manifest.id, "harshith.system-monitor")
-  assert.equal(manifest.version, "1.2.0")
+  assert.equal(manifest.version, "1.5.2")
   assert.equal(manifest.license, "MIT")
   assert.equal(manifest.homepage, "https://github.com/Harshith292002/omarchy-system-monitor")
   assert.equal(manifest.barWidget.defaultSection, "right")
   assert.ok(manifest.barWidget.schema.some((entry) => entry.key === "warningPercent"))
   const barMode = manifest.barWidget.schema.find((entry) => entry.key === "barMode")
   assert.ok(barMode.options.includes("GPU"))
+  assert.ok(barMode.options.includes("Temp"))
   assert.ok(barMode.options.includes("Icon"))
 })
 

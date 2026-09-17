@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "harshith.system-monitor",
   "name": "System Monitor",
-  "version": "1.2.0",
+  "version": "1.5.2",
   "author": "Harshith",
   "license": "MIT",
   "homepage": "https://github.com/Harshith292002/omarchy-system-monitor",
@@ -28,7 +28,7 @@
       "networkInterface": ""
     },
     "schema": [
-      { "key": "barMode", "type": "enum", "label": "Bar display", "options": ["Adaptive", "CPU", "Memory", "GPU", "Both", "Icon"], "defaultValue": "Adaptive" },
+      { "key": "barMode", "type": "enum", "label": "Bar display", "options": ["Adaptive", "CPU", "Memory", "GPU", "Temp", "Both", "Icon"], "defaultValue": "Adaptive" },
       { "key": "closedRefreshSec", "type": "integer", "label": "Closed refresh interval (seconds)", "min": 2, "max": 60, "step": 1, "defaultValue": 5 },
       { "key": "openRefreshSec", "type": "integer", "label": "Open refresh interval (seconds)", "min": 1, "max": 10, "step": 1, "defaultValue": 2 },
       { "key": "warningPercent", "type": "integer", "label": "Warning threshold", "min": 50, "max": 95, "step": 1, "defaultValue": 80 },

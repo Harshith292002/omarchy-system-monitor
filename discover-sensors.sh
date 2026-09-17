@@ -2,7 +2,11 @@
 
 shopt -s nullglob
 
-for hwmon in /sys/class/hwmon/hwmon*; do
+# Overridable so the CPU-temperature and platform-sensor discovery can be
+# exercised against fixture hwmon trees, mirroring the DRM root below.
+hwmon_root="${OMARCHY_SYSMON_HWMON_ROOT:-/sys/class/hwmon}"
+
+for hwmon in "$hwmon_root"/hwmon*; do
   [[ -r "$hwmon/name" ]] || continue
   IFS= read -r name <"$hwmon/name"
   [[ "$name" == "coretemp" || "$name" == "k10temp" || "$name" == "zenpower" ]] || continue
@@ -27,6 +31,77 @@ for hwmon in /sys/class/hwmon/hwmon*; do
     printf 'cpu_temp\t%s\n' "$selected"
     break
   fi
+done
+
+# Apple Silicon (Asahi Linux) publishes no package sensor at all — the SoC's
+# die temperatures live in the PMU and never reach sysfs — so x86-only driver
+# matching above finds nothing. The SMC hwmon driver instead carries labelled
+# platform sensors: peripheral temperatures and power rails, including a
+# heatpipe power estimate that tracks the heat the SoC is dissipating. Those
+# are listed here so the panel can show every reading that does exist.
+for hwmon in "$hwmon_root"/hwmon*; do
+  [[ -r "$hwmon/name" ]] || continue
+  IFS= read -r name <"$hwmon/name"
+  [[ "$name" == "macsmc_hwmon" ]] || continue
+
+  for input in "$hwmon"/temp*_input; do
+    [[ -r "$input" ]] || continue
+    label=""
+    label_file="${input%_input}_label"
+    if [[ -r "$label_file" ]]; then
+      IFS= read -r label <"$label_file"
+      # sysfs labels may carry trailing padding; trim whitespace from both
+      # ends without touching spaces inside the label itself.
+      label="${label#"${label%%[![:space:]]*}"}"
+      label="${label%"${label##*[![:space:]]}"}"
+    fi
+    if [[ -z "$label" ]]; then
+      # ".../temp3_input" -> "Temperature 3"
+      label="Temperature ${input##*temp}"
+      label="${label%_input}"
+    fi
+    printf 'platform_sensor\t%s\ttemp\t%s\n' "$input" "$label"
+  done
+
+  for input in "$hwmon"/power*_input; do
+    [[ -r "$input" ]] || continue
+    label=""
+    label_file="${input%_input}_label"
+    if [[ -r "$label_file" ]]; then
+      IFS= read -r label <"$label_file"
+      label="${label#"${label%%[![:space:]]*}"}"
+      label="${label%"${label##*[![:space:]]}"}"
+    fi
+    if [[ -z "$label" ]]; then
+      # ".../power2_input" -> "Power 2"
+      label="Power ${input##*power}"
+      label="${label%_input}"
+    fi
+    printf 'platform_sensor\t%s\tpower\t%s\n' "$input" "$label"
+  done
+
+  # Fans: the input path plus the driver's RPM window, so the panel can poll
+  # live speeds straight from sysfs without shelling out.
+  for input in "$hwmon"/fan*_input; do
+    [[ -r "$input" ]] || continue
+    label=""
+    label_file="${input%_input}_label"
+    if [[ -r "$label_file" ]]; then
+      IFS= read -r label <"$label_file"
+      label="${label#"${label%%[![:space:]]*}"}"
+      label="${label%"${label##*[![:space:]]}"}"
+    fi
+    fan_index="${input##*fan}"
+    fan_index="${fan_index%_input}"
+    [[ -z "$label" ]] && label="Fan $fan_index"
+    min=""
+    [[ -r "${input%_input}_min" ]] && IFS= read -r min <"${input%_input}_min"
+    max=""
+    [[ -r "${input%_input}_max" ]] && IFS= read -r max <"${input%_input}_max"
+    printf 'fan\t%s\t%s\t%s\t%s\t%s\n' "$input" "$fan_index" "$label" "${min:-0}" "${max:-0}"
+  done
+
+  break
 done
 
 for block_path in /sys/class/block/*; do

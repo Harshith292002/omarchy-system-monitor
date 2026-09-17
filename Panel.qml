@@ -35,8 +35,12 @@ Panel {
   readonly property real warningThreshold: Math.min(Number(setting("warningPercent", 80)), criticalThreshold - 1)
   readonly property real criticalThreshold: Math.max(Number(setting("criticalPercent", 95)), 61)
   readonly property real pressure: Math.max(metrics.cpuPercent, metrics.memoryPercent)
-  readonly property bool warning: pressure >= warningThreshold || metrics.cpuTemperature >= 85 || metrics.gpuTemperature >= 85
-  readonly property bool critical: pressure >= criticalThreshold || metrics.cpuTemperature >= 95 || metrics.gpuTemperature >= 95
+  // On machines with no package sensor (Apple Silicon), the thermal load
+  // shows in heatpipe watts: the tint tracks dissipated heat, the hottest
+  // platform temperature, and a non-auto fan mode (the SMC's automatic
+  // curve is overridden then, so software is the safety net).
+  readonly property bool warning: pressure >= warningThreshold || metrics.cpuTemperature >= 85 || metrics.gpuTemperature >= 85 || metrics.hottestPlatformTemp >= 85 || (metrics.cpuTemperature < 0 && metrics.heatpipeWatts >= heatWarnW) || metrics.fansManual
+  readonly property bool critical: pressure >= criticalThreshold || metrics.cpuTemperature >= 95 || metrics.gpuTemperature >= 95 || metrics.hottestPlatformTemp >= 95 || (metrics.cpuTemperature < 0 && metrics.heatpipeWatts >= heatCriticalW)
 
   readonly property string heroGlyph: "󰻠"
 
@@ -63,6 +67,24 @@ Panel {
     var text = Math.round(value) + "%"
     while (text.length < 4) text = " " + text
     return text
+  }
+
+  // Fixed-width thermal bar value: watts on Asahi (heatpipe), °C elsewhere.
+  function padThermalBarValue() {
+    if (thermalTileIsWatts()) {
+      var text = metrics.heatpipeWatts.toFixed(1) + "W"
+      while (text.length < 5) text = " " + text
+      return text
+    }
+    var t = metrics.cpuTemperature >= 0 ? metrics.cpuTemperature : metrics.hottestPlatformTemp
+    if (!isFinite(t) || t < 0) return "  —"
+    var deg = Math.round(t) + "°"
+    while (deg.length < 4) deg = " " + deg
+    return deg
+  }
+
+  function thermalBarName() {
+    return thermalTileIsWatts() ? "HEAT" : "TEMP"
   }
 
   function formatBytes(value) {
@@ -114,20 +136,88 @@ Panel {
     return one(metrics.loadOne) + " / " + one(metrics.loadFive) + " / " + one(metrics.loadFifteen)
   }
 
-  function temperatureText() {
-    return metrics.cpuTemperature >= 0 ? Math.round(metrics.cpuTemperature) + "°C" : "—"
+  // ---- Thermal headline ----
+  // With a package sensor (x86/AMD) the tile is that temperature. On Apple
+  // Silicon there is no die temperature at all, and the warmest exposed
+  // sensor is a peripheral that can read mild while the SoC runs hot out of
+  // sight — so the headline there is heatpipe power: the watts the SoC is
+  // actually dissipating, the number that tracks the warmth you feel and
+  // the same input the fan curves follow.
+  readonly property real heatWarnW: 15
+  readonly property real heatCriticalW: 25
+  readonly property real heatCeilingW: 30
+
+  function thermalTileIsWatts() {
+    return metrics.cpuTemperature < 0 && metrics.heatpipeWatts >= 0
   }
 
-  function temperatureDetail() {
-    if (metrics.cpuTemperature < 0) return "Unavailable"
-    if (metrics.cpuTemperature >= 85) return "Warm"
-    return "Normal"
+  function thermalTileTitle() {
+    return thermalTileIsWatts() ? "HEAT" : "TEMP"
   }
 
-  function temperatureMeter() {
-    if (metrics.cpuTemperature < 0) return -1
+  function thermalTileValue() {
+    if (thermalTileIsWatts()) return metrics.heatpipeWatts.toFixed(1) + " W"
+    if (metrics.cpuTemperature >= 0) return Math.round(metrics.cpuTemperature) + "°C"
+    if (metrics.hottestPlatformTemp >= 0) return Math.round(metrics.hottestPlatformTemp) + "°C"
+    return "—"
+  }
+
+  function thermalTileDetail() {
+    // Keep this short: the three-up tile row clips longer copy.
+    // Heatpipe watts are the real signal; no cool/warm/hot feel labels —
+    // those would pretend a chassis-dependent guess is calibrated.
+    if (thermalTileIsWatts()) return "heatpipe"
+    if (metrics.cpuTemperature >= 0) {
+      if (metrics.cpuTemperature >= 85) return "Warm"
+      return "Normal"
+    }
+    // No heatpipe sensor either: the warmest exposed temperature, labelled
+    // as what it is — a peripheral, not the machine's peak.
+    var source = temperatureSourceLabel()
+    if (source !== "") return "warmest: " + source
+    return metrics.hasPlatformSensors ? "No SoC sensor" : "Unavailable"
+  }
+
+  function thermalTileMeter() {
+    if (thermalTileIsWatts()) {
+      return Math.max(0, Math.min(100, metrics.heatpipeWatts * 100 / heatCeilingW))
+    }
+    return temperatureBandMeter(metrics.cpuTemperature >= 0 ? metrics.cpuTemperature : metrics.hottestPlatformTemp)
+  }
+
+  function thermalTileMeterColor() {
+    if (thermalTileIsWatts()) return levelColor(metrics.heatpipeWatts, heatWarnW, heatCriticalW)
+    return levelColor(metrics.cpuTemperature >= 0 ? metrics.cpuTemperature : metrics.hottestPlatformTemp, 85, 95)
+  }
+
+  function thermalTileAlarming() {
+    if (thermalTileIsWatts()) return metrics.heatpipeWatts >= heatCriticalW
+    return (metrics.cpuTemperature >= 0 ? metrics.cpuTemperature : metrics.hottestPlatformTemp) >= 95
+  }
+
+  // Tooltip headline: the package sensor when there is one, then heatpipe
+  // watts, then the warmest exposed temperature.
+  function headlineTempText() {
+    if (metrics.cpuTemperature >= 0) return Math.round(metrics.cpuTemperature) + "°C"
+    if (metrics.heatpipeWatts >= 0) return "heat " + metrics.heatpipeWatts.toFixed(1) + " W"
+    if (metrics.hottestPlatformTemp >= 0) return "warmest " + Math.round(metrics.hottestPlatformTemp) + "°C"
+    return "—"
+  }
+
+  function temperatureSourceLabel() {
+    var sensor = metrics.hottestPlatformSensor
+    if (!sensor || !isFinite(sensor.value) || sensor.value < 0) return ""
+    return String(sensor.label)
+      .replace(/ Temperature$/, "")
+      .replace(/ Temp$/, "")
+  }
+
+  // Package temperature only spans a useful band; drawing 57°C as 57% of a
+  // meter makes a cold chip look half-loaded. Anchor the scale at 30°C.
+  function temperatureBandMeter(value) {
+    if (!isFinite(value) || value < 0) return -1
     var span = temperatureCeiling - temperatureFloor
-    return Math.max(0, Math.min(100, (metrics.cpuTemperature - temperatureFloor) * 100 / span))
+    return Math.max(0, Math.min(100, (value - temperatureFloor) * 100 / span))
   }
 
   // Vendors expose different subsets: amdgpu publishes utilisation, memory and
@@ -153,9 +243,87 @@ Panel {
   // Same anchored scale as the CPU package sensor: a cold die drawn as a
   // fraction of 100°C reads as half-loaded.
   function gpuTemperatureMeter() {
-    if (metrics.gpuTemperature < 0) return -1
-    var span = temperatureCeiling - temperatureFloor
-    return Math.max(0, Math.min(100, (metrics.gpuTemperature - temperatureFloor) * 100 / span))
+    return temperatureBandMeter(metrics.gpuTemperature)
+  }
+
+  // Platform sensor rows: hwmon temperatures in °C, power rails in W. The
+  // value is muted rather than dash-only when a sensor reports nothing.
+  function sensorValueText(sensor) {
+    if (!sensor || !isFinite(sensor.value) || sensor.value < 0) return "—"
+    if (sensor.kind === "power") return sensor.value.toFixed(1) + " W"
+    return Math.round(sensor.value) + "°C"
+  }
+
+  function sensorSummaryText() {
+    if (metrics.hottestPlatformTemp >= 0) return "peak " + Math.round(metrics.hottestPlatformTemp) + "°C"
+    return ""
+  }
+
+  // Default SENSORS list stays short: heatpipe (drives HEAT + fans), the
+  // battery/charge thermal pair, and total system power. NAND / Wi-Fi /
+  // rail watts hide behind "show all" so the panel stays scannable.
+  property bool showAllPlatformSensors: false
+
+  function isPrimaryPlatformSensor(sensor) {
+    if (!sensor) return false
+    var label = String(sensor.label || "").toLowerCase()
+    if (label.indexOf("heatpipe") >= 0) return true
+    if (label.indexOf("battery") >= 0) return true
+    if (label.indexOf("charge") >= 0) return true
+    if (label.indexOf("total system") >= 0) return true
+    return false
+  }
+
+  function visiblePlatformSensors() {
+    var all = metrics.platformSensors
+    if (root.showAllPlatformSensors) return all
+    var rows = []
+    for (var i = 0; i < all.length; i++) {
+      if (root.isPrimaryPlatformSensor(all[i])) rows.push(all[i])
+    }
+    // If nothing matched labels (unexpected SMC naming), fall back to all
+    // rather than an empty section.
+    return rows.length > 0 ? rows : all
+  }
+
+  function hiddenPlatformSensorCount() {
+    if (root.showAllPlatformSensors) return 0
+    var all = metrics.platformSensors
+    var visible = root.visiblePlatformSensors()
+    if (visible.length === all.length) return 0
+    return Math.max(0, all.length - visible.length)
+  }
+
+  // ---- Fans ----
+
+  function fanRpmText(fan) {
+    if (!fan || !isFinite(fan.rpm) || fan.rpm < 0) return "—"
+    var text = Math.round(fan.rpm) + " RPM"
+    // The target only means something while the fan is in manual mode;
+    // under SMC control it is Apple's own request, not ours.
+    if (metrics.fansManual && isFinite(fan.target) && fan.target > 0) {
+      text += " · tgt " + Math.round(fan.target)
+    }
+    return text
+  }
+
+  function fansSummaryText() {
+    if (!metrics.fanCtlAvailable) return "monitor only"
+    if (!metrics.fanControlUnlocked) return "locked · SMC auto"
+    if (metrics.fanStatus && metrics.fanStatus.daemon && metrics.fanStatus.daemon.active !== true) return "daemon down"
+    if (metrics.fanMode === "" || metrics.fanMode === "auto") return "SMC auto"
+    return "manual · " + metrics.fanMode
+  }
+
+  function applyFanCurve() {
+    metrics.runFanctl([
+      "curve",
+      String(loWField.field.value),
+      String(hiWField.field.value),
+      String(rpmMinField.field.value),
+      String(rpmMaxField.field.value),
+      String(floorField.field.value)
+    ])
   }
 
   // Row skips invisible children, so the divisor is the number of tiles that
@@ -232,6 +400,11 @@ Panel {
   function barLabel() {
     // A vertical bar has room for the number and nothing else.
     if (button.vertical) {
+      if (barMode === "Temp") {
+        if (thermalTileIsWatts()) return metrics.heatpipeWatts.toFixed(0)
+        var tv = metrics.cpuTemperature >= 0 ? metrics.cpuTemperature : metrics.hottestPlatformTemp
+        return isFinite(tv) && tv >= 0 ? String(Math.round(tv)) : "—"
+      }
       var value = barMode === "CPU" ? metrics.cpuPercent
         : barMode === "Memory" ? metrics.memoryPercent
         : barMode === "GPU" ? metrics.gpuPercent
@@ -241,10 +414,10 @@ Panel {
     if (barMode === "CPU") return "CPU " + padPercent(metrics.cpuPercent)
     if (barMode === "Memory") return "RAM " + padPercent(metrics.memoryPercent)
     if (barMode === "GPU") return "GPU " + padPercent(metrics.gpuPercent)
+    if (barMode === "Temp") return thermalBarName() + " " + padThermalBarValue()
     if (barMode === "Both")
       return "C " + padPercent(metrics.cpuPercent) + " M " + padPercent(metrics.memoryPercent)
-    // Adaptive: whichever metric is under more pressure, named so the number
-    // is never ambiguous.
+    // Adaptive: CPU vs RAM pressure only — never heat/temp (explicit Temp mode).
     return metrics.cpuPercent >= metrics.memoryPercent
       ? "CPU " + padPercent(metrics.cpuPercent)
       : "RAM " + padPercent(metrics.memoryPercent)
@@ -255,7 +428,7 @@ Panel {
     // Text.AutoText, so neutralize markup before handing it configuration.
     var interfaceName = Model.escapeMarkup(metrics.activeInterface)
     var lines = [
-      "CPU " + percent(metrics.cpuPercent) + " · RAM " + percent(metrics.memoryPercent) + " · " + temperatureText()
+      "CPU " + percent(metrics.cpuPercent) + " · RAM " + percent(metrics.memoryPercent) + " · " + headlineTempText()
     ]
     // Skipped entirely on machines without a utilisation-reporting GPU, so
     // the tooltip never grows a row of em dashes.
@@ -266,6 +439,14 @@ Panel {
       if (hasGpuVram) gpu.push("VRAM " + gpuVramDetail())
       lines.push(gpu.join(" · "))
     }
+    if (metrics.fans.length > 0) {
+      var speeds = []
+      for (var fanIndex = 0; fanIndex < metrics.fans.length; fanIndex++) {
+        var fan = metrics.fans[fanIndex]
+        speeds.push(isFinite(fan.rpm) && fan.rpm >= 0 ? Math.round(fan.rpm) + " RPM" : "—")
+      }
+      lines.push("Fans " + speeds.join(" / ") + (metrics.fansManual ? " · " + metrics.fanMode : " · SMC"))
+    }
     lines.push("Load " + loadText() + (interfaceName !== "" ? " · " + interfaceName : ""))
     lines.push("Net ↓ " + formatRate(metrics.networkDownBps) + " ↑ " + formatRate(metrics.networkUpBps))
     lines.push("Disk R " + formatRate(metrics.diskReadBps) + " · W " + formatRate(metrics.diskWriteBps))
@@ -274,7 +455,10 @@ Panel {
   }
 
   function cycleBarMode() {
-    var modes = hasGpuUsage ? ["Adaptive", "CPU", "Memory", "GPU", "Both", "Icon"] : ["Adaptive", "CPU", "Memory", "Both", "Icon"]
+    // Temp is opt-in via cycle / settings — never selected by Adaptive.
+    var modes = hasGpuUsage
+      ? ["Adaptive", "CPU", "Memory", "GPU", "Temp", "Both", "Icon"]
+      : ["Adaptive", "CPU", "Memory", "Temp", "Both", "Icon"]
     var index = modes.indexOf(barMode)
     var next = modes[(index + 1) % modes.length]
     settings = Object.assign({}, settings, { barMode: next })
@@ -381,9 +565,10 @@ Panel {
     contentWidth: panel.fittedContentWidth(Style.space(380))
     // Capped height, not a fixed one: fittedContentHeight still shrinks to fit
     // the screen and to the content itself, this just raises the ceiling so
-    // the added CapacityRow entries (one per auto-discovered disk) aren't
+    // the added CapacityRow entries (one per auto-discovered disk), platform
+    // sensor rows, thermal and RPM charts, and the fans section aren't
     // clipped.
-    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(600 + metrics.extraFilesystems.length * 40))
+    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(600 + metrics.extraFilesystems.length * 40 + (metrics.hasPlatformSensors ? metrics.platformSensors.length * 40 + (metrics.fanMode === "custom" ? 400 : 300) : 0)))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -476,12 +661,12 @@ Panel {
 
             StatTile {
               width: (parent.width - parent.spacing * 2) / 3
-              title: "TEMP"
-              value: root.temperatureText()
-              detail: root.temperatureDetail()
-              meter: root.temperatureMeter()
-              meterColor: root.levelColor(metrics.cpuTemperature, 85, 95)
-              alarming: metrics.cpuTemperature >= 95
+              title: root.thermalTileTitle()
+              value: root.thermalTileValue()
+              detail: root.thermalTileDetail()
+              meter: root.thermalTileMeter()
+              meterColor: root.thermalTileMeterColor()
+              alarming: root.thermalTileAlarming()
             }
           }
 
@@ -524,6 +709,264 @@ Panel {
               meter: root.gpuVramPercent()
               meterColor: root.levelColor(root.gpuVramPercent(), root.warningThreshold, root.criticalThreshold)
               alarming: root.gpuVramPercent() >= root.criticalThreshold
+            }
+          }
+
+          // ---------- Platform sensors (Apple Silicon) ----------
+          // Asahi machines have no package sensor, but the SMC publishes
+          // labelled peripheral temperatures and power rails. Default list
+          // is the useful few; "show all" reveals the rest.
+          Column {
+            width: parent.width
+            spacing: Style.space(6)
+            visible: metrics.hasPlatformSensors
+
+            SectionHeading {
+              title: "SENSORS"
+              value: root.sensorSummaryText()
+            }
+
+            // Thermal headline over time — the same value the HEAT tile
+            // carries (heatpipe watts here, package temperature elsewhere),
+            // peak-scaled like the network chart.
+            Item {
+              width: parent.width
+              height: Style.space(54)
+              visible: metrics.thermalHistory.length > 1
+
+              Sparkline {
+                anchors.fill: parent
+                points: metrics.thermalHistory
+                lineColor: root.accent
+                fillColor: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.16)
+                gridColor: root.chartGrid
+                fixedMaximum: Math.max(metrics.thermalPeak, 0.001)
+              }
+
+              Text {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                text: metrics.thermalHeadline >= 0
+                  ? metrics.thermalHeadline.toFixed(1) + " " + metrics.thermalHeadlineUnit
+                  : ""
+                textFormat: Text.PlainText
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: true
+              }
+
+              Text {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                text: metrics.thermalPeak > 0
+                  ? "peak " + (metrics.thermalPeak >= 100
+                      ? Math.round(metrics.thermalPeak)
+                      : metrics.thermalPeak.toFixed(1)) + " " + metrics.thermalHeadlineUnit
+                  : ""
+                textFormat: Text.PlainText
+                color: root.muted
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Repeater {
+              model: root.visiblePlatformSensors()
+
+              SensorRow {
+                required property var modelData
+                label: modelData.label
+                value: root.sensorValueText(modelData)
+                meter: modelData.kind === "temp" ? root.temperatureBandMeter(modelData.value) : -1
+                meterColor: root.levelColor(modelData.value, 85, 95)
+              }
+            }
+
+            Button {
+              visible: root.hiddenPlatformSensorCount() > 0 || root.showAllPlatformSensors
+              width: parent.width
+              text: root.showAllPlatformSensors
+                ? "Show fewer sensors"
+                : ("Show all sensors · " + root.hiddenPlatformSensorCount() + " more")
+              foreground: root.foreground
+              accent: root.accent
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              onClicked: root.showAllPlatformSensors = !root.showAllPlatformSensors
+            }
+          }
+
+          // ---------- Fans (Apple Silicon) ----------
+          // Macs Fan Control-style: live RPMs plus the preset selector.
+          // Auto hands the fans back to the SMC's own curve; the others
+          // run in the asahi-fand daemon following heatpipe power.
+          // Hidden without the SMC hwmon device.
+          Column {
+            width: parent.width
+            spacing: Style.space(6)
+            visible: metrics.hasPlatformSensors
+
+            SectionHeading {
+              title: "FANS"
+              value: root.fansSummaryText()
+            }
+
+            Repeater {
+              model: metrics.fans
+
+              FanRow {
+                required property var modelData
+                label: modelData.label
+                rpmText: root.fanRpmText(modelData)
+                rangeText: (isFinite(modelData.min) && isFinite(modelData.max)
+                  ? Math.round(modelData.min) + "–" + Math.round(modelData.max) + " RPM" : "")
+                manual: metrics.fansManual
+              }
+            }
+
+            Text {
+              visible: metrics.fanCtlError !== ""
+              width: parent.width
+              text: metrics.fanCtlError
+              textFormat: Text.PlainText
+              color: root.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            // Helper missing: sensors keep working, control just isn't
+            // possible. Point at the README rather than a dead button.
+            Text {
+              visible: !metrics.fanCtlAvailable
+              width: parent.width
+              text: "Fan control requires the asahi-fanctl helper (see README)"
+              textFormat: Text.PlainText
+              color: root.muted
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            // Control locked (module parameter off): one click unlocks it.
+            Button {
+              visible: metrics.fanCtlAvailable && !metrics.fanControlUnlocked
+              width: parent.width
+              text: "Enable manual control"
+              foreground: root.foreground
+              accent: root.accent
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              onClicked: metrics.enableFanControl()
+            }
+
+            // Presets, deliberately far apart so they feel different:
+            // Auto (SMC), Quiet (minimum idle, capped), Boost (audible
+            // floor, full by 14 W), Full, Custom. One row.
+            ButtonGroup {
+              width: parent.width
+              visible: metrics.fanCtlAvailable
+              foreground: root.foreground
+              accent: root.accent
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              options: [
+                { value: "auto", label: "Auto" },
+                { value: "quiet", label: "Quiet" },
+                { value: "boost", label: "Boost" },
+                { value: "full", label: "Full" },
+                { value: "custom", label: "Custom" }
+              ]
+              value: metrics.fanMode
+              onChanged: function(selected) { metrics.runFanctl(["mode", selected]) }
+            }
+
+            // Custom curve: RPM scales from rpm min to max as heatpipe power
+            // crosses the watt window; the floor is an always-at-least RPM.
+            Column {
+              id: curveEditor
+              width: parent.width
+              spacing: Style.space(4)
+              visible: metrics.fanMode === "custom"
+
+              Row {
+                spacing: Style.space(8)
+
+                NumberField {
+                  id: loWField
+                  label: "Low W"
+                  from: 0
+                  to: 60
+                  stepSize: 1
+                  value: Math.round(metrics.fanCurveLoW)
+                  foreground: root.foreground
+                  accent: root.accent
+                  fontFamily: root.fontFamily
+                }
+
+                NumberField {
+                  id: hiWField
+                  label: "High W"
+                  from: 1
+                  to: 100
+                  stepSize: 1
+                  value: Math.round(metrics.fanCurveHiW)
+                  foreground: root.foreground
+                  accent: root.accent
+                  fontFamily: root.fontFamily
+                }
+
+                NumberField {
+                  id: floorField
+                  label: "Floor RPM"
+                  from: 0
+                  to: 6400
+                  stepSize: 50
+                  value: Math.round(metrics.fanCurveFloorRpm)
+                  foreground: root.foreground
+                  accent: root.accent
+                  fontFamily: root.fontFamily
+                }
+              }
+
+              Row {
+                spacing: Style.space(8)
+
+                NumberField {
+                  id: rpmMinField
+                  label: "Min RPM"
+                  from: 1200
+                  to: 6400
+                  stepSize: 50
+                  value: Math.round(metrics.fanCurveRpmMin)
+                  foreground: root.foreground
+                  accent: root.accent
+                  fontFamily: root.fontFamily
+                }
+
+                NumberField {
+                  id: rpmMaxField
+                  label: "Max RPM"
+                  from: 1200
+                  to: 6400
+                  stepSize: 50
+                  value: Math.round(metrics.fanCurveRpmMax)
+                  foreground: root.foreground
+                  accent: root.accent
+                  fontFamily: root.fontFamily
+                }
+
+                Button {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "Apply"
+                  foreground: root.foreground
+                  accent: root.accent
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.bodySmall
+                  onClicked: root.applyFanCurve()
+                }
+              }
             }
           }
 
@@ -994,6 +1437,108 @@ Panel {
       color: root.foreground
       font.family: root.fontFamily
       font.pixelSize: Style.font.bodySmall
+    }
+  }
+
+  // One platform sensor: label left, live value right, and for temperatures
+  // the same anchored meter band the package tiles use. Power rails skip the
+  // meter — there is no natural ceiling for watts.
+  component SensorRow: Column {
+    id: sensorRow
+    property string label: ""
+    property string value: "—"
+    property real meter: -1
+    property color meterColor: root.accent
+
+    width: parent ? parent.width : 0
+    spacing: Style.space(3)
+
+    Item {
+      width: parent.width
+      implicitHeight: Math.max(sensorLabel.implicitHeight, sensorValue.implicitHeight)
+
+      Text {
+        id: sensorLabel
+        text: sensorRow.label
+        // Labels arrive from sysfs label files, so pin the format instead of
+        // leaving Text.AutoText to sniff a crafted label as rich text.
+        textFormat: Text.PlainText
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      Text {
+        id: sensorValue
+        text: sensorRow.value
+        color: root.muted
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.bold: true
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+      }
+    }
+
+    Meter {
+      width: parent.width
+      visible: sensorRow.meter >= 0
+      value: sensorRow.meter
+      fillColor: sensorRow.meterColor
+    }
+  }
+
+  // One fan: label and live RPM on the first line, the driver's RPM window
+  // beneath it. The RPM value warms up while the fan is under manual control
+  // so the row itself says which side owns it.
+  component FanRow: Column {
+    id: fanRow
+    property string label: ""
+    property string rpmText: "—"
+    property string rangeText: ""
+    property bool manual: false
+
+    width: parent ? parent.width : 0
+    spacing: Style.space(3)
+
+    Item {
+      width: parent.width
+      implicitHeight: Math.max(fanLabel.implicitHeight, fanRpm.implicitHeight)
+
+      Text {
+        id: fanLabel
+        text: fanRow.label
+        textFormat: Text.PlainText
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      Text {
+        id: fanRpm
+        text: fanRow.rpmText
+        textFormat: Text.PlainText
+        color: fanRow.manual ? root.warningColor : root.muted
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.bold: true
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+      }
+    }
+
+    Text {
+      visible: fanRow.rangeText !== ""
+      text: fanRow.rangeText
+      textFormat: Text.PlainText
+      color: root.muted
+      opacity: 0.7
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
     }
   }
 
