@@ -137,8 +137,9 @@ Panel {
   readonly property bool hasGpuUsage: metrics.gpuPercent >= 0
   readonly property bool hasGpuTemperature: metrics.gpuTemperature >= 0
   readonly property bool hasGpuVram: metrics.gpuVramTotal > 0 && metrics.gpuVramUsed >= 0
+  readonly property bool hasGpuGtt: metrics.gpuGttTotal > 0 && metrics.gpuGttUsed >= 0
   readonly property bool hasGpu: hasGpuUsage || hasGpuTemperature
-  readonly property int gpuTileCount: (hasGpuUsage ? 1 : 0) + (hasGpuTemperature ? 1 : 0) + (hasGpuVram ? 1 : 0)
+  readonly property int gpuTileCount: (hasGpuUsage ? 1 : 0) + (hasGpuTemperature ? 1 : 0) + (hasGpuVram ? 1 : 0) + (hasGpuGtt ? 1 : 0)
 
   function gpuTemperatureText() {
     return metrics.gpuTemperature >= 0 ? Math.round(metrics.gpuTemperature) + "°C" : "—"
@@ -170,9 +171,19 @@ Panel {
     return Math.max(0, Math.min(100, metrics.gpuVramUsed * 100 / metrics.gpuVramTotal))
   }
 
+  function gpuGttPercent() {
+    if (metrics.gpuGttTotal <= 0 || metrics.gpuGttUsed < 0) return -1
+    return Math.max(0, Math.min(100, metrics.gpuGttUsed * 100 / metrics.gpuGttTotal))
+  }
+
   function gpuVramDetail() {
     if (metrics.gpuVramTotal <= 0 || metrics.gpuVramUsed < 0) return "—"
     return formatPair(metrics.gpuVramUsed, metrics.gpuVramTotal)
+  }
+
+  function gpuGttDetail() {
+    if (metrics.gpuGttTotal <= 0 || metrics.gpuGttUsed < 0) return "—"
+    return formatPair(metrics.gpuGttUsed, metrics.gpuGttTotal)
   }
 
   // nvme0n1 → nvme0, mmcblk0 → mmc0; sda and friends are already short.
@@ -264,6 +275,7 @@ Panel {
       if (hasGpuUsage) gpu.push("GPU " + percent(metrics.gpuPercent))
       if (hasGpuTemperature) gpu.push((hasGpuUsage ? "" : "GPU ") + gpuTemperatureText())
       if (hasGpuVram) gpu.push("VRAM " + gpuVramDetail())
+      if (hasGpuGtt) gpu.push("GTT " + gpuGttDetail())
       lines.push(gpu.join(" · "))
     }
     lines.push("Load " + loadText() + (interfaceName !== "" ? " · " + interfaceName : ""))
@@ -498,7 +510,7 @@ Panel {
               width: root.gpuTileWidth(parent.width, parent.spacing)
               title: "GPU"
               value: root.percent(metrics.gpuPercent)
-              detail: root.hasGpuVram ? root.formatBytes(metrics.gpuVramTotal) + " VRAM" : "—"
+              detail: root.hasGpuVram ? root.formatBytes(metrics.gpuVramUsed + (metrics.gpuGttUsed ? metrics.gpuGttUsed : 0)): "—"
               meter: metrics.gpuPercent
               meterColor: root.levelColor(metrics.gpuPercent, root.warningThreshold, root.criticalThreshold)
               alarming: metrics.gpuPercent >= root.criticalThreshold
@@ -524,6 +536,17 @@ Panel {
               meter: root.gpuVramPercent()
               meterColor: root.levelColor(root.gpuVramPercent(), root.warningThreshold, root.criticalThreshold)
               alarming: root.gpuVramPercent() >= root.criticalThreshold
+            }
+
+            StatTile {
+              visible: root.hasGpuGtt
+              width: root.gpuTileWidth(parent.width, parent.spacing)
+              title: "GTT"
+              value: root.percent(root.gpuGttPercent())
+              detail: root.gpuGttDetail()
+              meter: root.gpuGttPercent()
+              meterColor: root.levelColor(root.gpuGttPercent(), root.warningThreshold, root.criticalThreshold)
+              alarming: root.gpuGttPercent() >= root.criticalThreshold
             }
           }
 
