@@ -32,6 +32,8 @@ Item {
   property real gpuTemperature: -1
   property double gpuVramUsed: -1
   property double gpuVramTotal: -1
+  property double gpuGttUsed: -1
+  property double gpuGttTotal: -1
   property real networkDownBps: -1
   property real networkUpBps: -1
   property real diskReadBps: -1
@@ -47,6 +49,8 @@ Item {
   property string gpuTempPath: ""
   property string gpuVramUsedPath: ""
   property string gpuVramTotalPath: ""
+  property string gpuGttUsedPath: ""
+  property string gpuGttTotalPath: ""
   property var diskDevices: []
   property double lastSampleMs: 0
   property double lastFilesystemRefreshMs: 0
@@ -91,7 +95,10 @@ Item {
     if (gpuTempPath !== "") gpuTemperatureFile.reload()
     // VRAM only moves when the panel is open and a human is looking; polling
     // it on the closed cadence buys nothing and costs two sysfs reads.
-    if (panelOpen && gpuVramUsedPath !== "") gpuVramUsedFile.reload()
+    if (panelOpen && gpuVramUsedPath !== "") {
+      gpuVramUsedFile.reload()
+      gpuGttUsedFile.reload()
+    }
 
     var now = Date.now()
     if (panelOpen && !filesystemProc.running && now - lastFilesystemRefreshMs >= 60000) {
@@ -307,6 +314,24 @@ Item {
   }
 
   FileView {
+    id: gpuGttUsedFile
+    path: root.gpuGttUsedPath
+    watchChanges: false
+    printErrors: false
+    onLoaded: root.gpuGttUsed = Model.parseByteCount(text())
+    onLoadFailed: root.gpuGttUsed = -1
+  }
+
+  FileView {
+    id: gpuGttTotalFile
+    path: root.gpuGttTotalPath
+    watchChanges: false
+    printErrors: false
+    onLoaded: root.gpuGttTotal = Model.parseByteCount(text())
+    onLoadFailed: root.gpuGttTotal = -1
+  }
+
+  FileView {
     path: "/etc/hostname"
     watchChanges: true
     printErrors: false
@@ -326,6 +351,8 @@ Item {
         root.gpuTempPath = discovered.gpuTempPath
         root.gpuVramUsedPath = discovered.gpuVramUsedPath
         root.gpuVramTotalPath = discovered.gpuVramTotalPath
+        root.gpuGttUsedPath = discovered.gpuGttUsedPath
+        root.gpuGttTotalPath = discovered.gpuGttTotalPath
         root.diskDevices = discovered.devices
         root.diskSnapshot = null
         if (root.cpuTempPath !== "") temperatureFile.reload()
@@ -335,6 +362,8 @@ Item {
         // rather than on every sample.
         if (root.gpuVramTotalPath !== "") gpuVramTotalFile.reload()
         if (root.gpuVramUsedPath !== "") gpuVramUsedFile.reload()
+        if (root.gpuGttTotalPath !== "") gpuGttTotalFile.reload()
+        if (root.gpuGttUsedPath !== "") gpuGttUsedFile.reload()
         diskFile.reload()
       }
     }

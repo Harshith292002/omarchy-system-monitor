@@ -68,6 +68,8 @@ gpu_busy=""
 gpu_temp=""
 gpu_vram_used=""
 gpu_vram_total=""
+gpu_gtt_used=""
+gpu_gtt_total=""
 
 for card in "$drm_root"/card*; do
   name="${card##*/}"
@@ -109,8 +111,12 @@ for card in "$drm_root"/card*; do
     gpu_temp="$temp"
     gpu_vram_used=""
     gpu_vram_total=""
+    gpu_gtt_used=""
+    gpu_gtt_total=""
     [[ -r "$device/mem_info_vram_used" ]] && gpu_vram_used="$device/mem_info_vram_used"
     [[ -r "$device/mem_info_vram_total" ]] && gpu_vram_total="$device/mem_info_vram_total"
+    [[ -r "$device/mem_info_gtt_used" ]] && gpu_gtt_used="$device/mem_info_gtt_used"
+    [[ -r "$device/mem_info_gtt_total" ]] && gpu_gtt_total="$device/mem_info_gtt_total"
   fi
 done
 
@@ -118,4 +124,6 @@ done
 [[ -n "$gpu_temp" ]] && printf 'gpu_temp\t%s\n' "$gpu_temp"
 [[ -n "$gpu_vram_used" ]] && printf 'gpu_vram_used\t%s\n' "$gpu_vram_used"
 [[ -n "$gpu_vram_total" ]] && printf 'gpu_vram_total\t%s\n' "$gpu_vram_total"
+[[ -n "$gpu_gtt_used" ]] && printf 'gpu_gtt_used\t%s\n' "$gpu_gtt_used"
+[[ -n "$gpu_gtt_total" ]] && printf 'gpu_gtt_total\t%s\n' "$gpu_gtt_total"
 exit 0

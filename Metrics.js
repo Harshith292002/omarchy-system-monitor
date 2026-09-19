@@ -145,6 +145,8 @@ function parseDiscovery(raw) {
     gpuTempPath: "",
     gpuVramUsedPath: "",
     gpuVramTotalPath: "",
+    gpuGttUsedPath: "",
+    gpuGttTotalPath: "",
     devices: []
   }
   var lines = String(raw || "").split("\n")
@@ -158,6 +160,8 @@ function parseDiscovery(raw) {
     else if (key === "gpu_temp") result.gpuTempPath = value
     else if (key === "gpu_vram_used") result.gpuVramUsedPath = value
     else if (key === "gpu_vram_total") result.gpuVramTotalPath = value
+    else if (key === "gpu_gtt_used") result.gpuGttUsedPath = value
+    else if (key === "gpu_gtt_total") result.gpuGttTotalPath = value
     else if (key === "disk" && value !== "") result.devices.push(value)
   }
   return result
