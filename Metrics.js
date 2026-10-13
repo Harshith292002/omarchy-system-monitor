@@ -145,7 +145,9 @@ function parseDiscovery(raw) {
     gpuTempPath: "",
     gpuVramUsedPath: "",
     gpuVramTotalPath: "",
-    devices: []
+    devices: [],
+    platformSensors: [],
+    fans: []
   }
   var lines = String(raw || "").split("\n")
   for (var i = 0; i < lines.length; i++) {
@@ -159,6 +161,37 @@ function parseDiscovery(raw) {
     else if (key === "gpu_vram_used") result.gpuVramUsedPath = value
     else if (key === "gpu_vram_total") result.gpuVramTotalPath = value
     else if (key === "disk" && value !== "") result.devices.push(value)
+    else if (key === "platform_sensor" && value !== "") {
+      // "path\tkind\tlabel": the label is everything past the second field,
+      // so a label containing a tab survives intact.
+      var fields = value.split("\t")
+      if (fields.length >= 3 && (fields[1] === "temp" || fields[1] === "power")) {
+        result.platformSensors.push({
+          path: fields[0],
+          kind: fields[1],
+          label: fields.slice(2).join("\t")
+        })
+      }
+    } else if (key === "fan" && value !== "") {
+      // "path\tindex\tlabel\tmin\tmax": the input path, from which the
+      // target path is derived by suffix substitution. A label containing
+      // tabs survives, so the bounds are the last two fields.
+      var parts = value.split("\t")
+      var fanIndex = Number(parts[1])
+      var fanMin = Number(parts[parts.length - 2])
+      var fanMax = Number(parts[parts.length - 1])
+      if (parts.length >= 5 && isFinite(fanIndex) && fanIndex > 0
+        && isFinite(fanMin) && isFinite(fanMax)) {
+        result.fans.push({
+          path: parts[0],
+          targetPath: parts[0].replace(/_input$/, "_target"),
+          index: fanIndex,
+          label: parts.slice(2, parts.length - 2).join("\t") || ("Fan " + fanIndex),
+          min: fanMin,
+          max: fanMax
+        })
+      }
+    }
   }
   return result
 }
@@ -179,6 +212,17 @@ function parseByteCount(raw) {
   if (text === "") return -1
   var value = Number(text)
   return isFinite(value) && value >= 0 ? value : -1
+}
+
+// Platform sensors follow the hwmon ABI: temperatures in milli-degrees C,
+// power in micro-watts. Scaled to °C and W respectively; -1 marks a missing
+// or unreadable value so a dead sensor prints an em dash, never a false 0.
+function parseSensorValue(raw, kind) {
+  var text = String(raw === undefined || raw === null ? "" : raw).trim()
+  if (text === "") return -1
+  var value = Number(text)
+  if (!isFinite(value) || value < 0) return -1
+  return kind === "power" ? value / 1000000 : value / 1000
 }
 
 // On-disk filesystem types worth a capacity row. An allowlist keeps the ever-
@@ -269,6 +313,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseDiscovery: parseDiscovery,
     parseGpuPercent: parseGpuPercent,
     parseByteCount: parseByteCount,
+    parseSensorValue: parseSensorValue,
     parseFilesystems: parseFilesystems,
     peakValue: peakValue,
     maximumPercent: maximumPercent,
