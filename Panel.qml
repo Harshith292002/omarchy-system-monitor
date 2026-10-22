@@ -236,6 +236,9 @@ Panel {
   readonly property bool hasGpuGtt: metrics.gpuGttTotal > 0 && metrics.gpuGttUsed >= 0
   readonly property bool hasGpu: hasGpuUsage || hasGpuTemperature
   readonly property int gpuTileCount: (hasGpuUsage ? 1 : 0) + (hasGpuTemperature ? 1 : 0) + (hasGpuVram ? 1 : 0) + (hasGpuGtt ? 1 : 0)
+  // A quarter-panel tile clips its "used / total" detail, so a full set of
+  // four wraps into two rows of two; up to three still share one row.
+  readonly property int gpuTileColumns: gpuTileCount > 3 ? 2 : Math.max(1, gpuTileCount)
 
   function gpuTemperatureText() {
     return metrics.gpuTemperature >= 0 ? Math.round(metrics.gpuTemperature) + "°C" : "—"
@@ -333,11 +336,10 @@ Panel {
     ])
   }
 
-  // Row skips invisible children, so the divisor is the number of tiles that
-  // this card can actually fill.
+  // Grid skips invisible children, so the divisor is the number of tiles that
+  // this card can actually fill on one row.
   function gpuTileWidth(rowWidth, spacing) {
-    var count = Math.max(1, gpuTileCount)
-    return (rowWidth - spacing * (count - 1)) / count
+    return (rowWidth - spacing * (gpuTileColumns - 1)) / gpuTileColumns
   }
 
   function gpuVramPercent() {
@@ -583,10 +585,10 @@ Panel {
     contentWidth: panel.fittedContentWidth(Style.space(380))
     // Capped height, not a fixed one: fittedContentHeight still shrinks to fit
     // the screen and to the content itself, this just raises the ceiling so
-    // the added CapacityRow entries (one per auto-discovered disk), platform
-    // sensor rows, thermal and RPM charts, and the fans section aren't
-    // clipped.
-    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(600 + metrics.extraFilesystems.length * 40 + (metrics.hasPlatformSensors ? metrics.platformSensors.length * 40 + (metrics.fanMode === "custom" ? 400 : 300) : 0)))
+    // the GPU section's second tile row, the added CapacityRow entries (one
+    // per auto-discovered disk), platform sensor rows, thermal and RPM charts,
+    // and the fans section aren't clipped.
+    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(600 + (root.gpuTileCount > root.gpuTileColumns ? 88 : 0) + metrics.extraFilesystems.length * 40 + (metrics.hasPlatformSensors ? metrics.platformSensors.length * 40 + (metrics.fanMode === "custom" ? 400 : 300) : 0)))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -691,8 +693,9 @@ Panel {
           // ---------- GPU ----------
           // Hidden outright when no card publishes utilisation, so machines
           // without one keep the original three-tile layout.
-          Row {
+          Grid {
             width: parent.width
+            columns: root.gpuTileColumns
             spacing: Style.space(8)
             visible: root.hasGpu
 
