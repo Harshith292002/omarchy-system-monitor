@@ -117,7 +117,8 @@ done
 # GPU. Vendors expose different subsets, so each sensor is probed on its own
 # rather than gated behind one capability:
 #
-#   amdgpu        gpu_busy_percent, hwmon temperature (temp1_input), mem_info_vram_*
+#   amdgpu        gpu_busy_percent, hwmon temperature (temp1_input),
+#                 mem_info_vram_* and mem_info_gtt_*
 #   i915          hwmon temperature only (temp1_input); no device-wide busy
 #                 counter exists in sysfs, utilisation needs the PMU or
 #                 per-client fdinfo

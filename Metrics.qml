@@ -277,12 +277,10 @@ Item {
     if (cpuTempPath !== "") temperatureFile.reload()
     if (gpuBusyPath !== "") gpuBusyFile.reload()
     if (gpuTempPath !== "") gpuTemperatureFile.reload()
-    // VRAM only moves when the panel is open and a human is looking; polling
-    // it on the closed cadence buys nothing and costs two sysfs reads.
-    if (panelOpen && gpuVramUsedPath !== "") {
-      gpuVramUsedFile.reload()
-      gpuGttUsedFile.reload()
-    }
+    // VRAM and GTT only move when the panel is open and a human is looking;
+    // polling them on the closed cadence buys nothing and costs sysfs reads.
+    if (panelOpen && gpuVramUsedPath !== "") gpuVramUsedFile.reload()
+    if (panelOpen && gpuGttUsedPath !== "") gpuGttUsedFile.reload()
     for (var i = 0; i < sensorFileViews.count; i++) {
       var sensorFile = sensorFileViews.objectAt(i)
       if (sensorFile) sensorFile.sample()
@@ -688,8 +686,8 @@ Item {
         if (root.cpuTempPath !== "") temperatureFile.reload()
         if (root.gpuBusyPath !== "") gpuBusyFile.reload()
         if (root.gpuTempPath !== "") gpuTemperatureFile.reload()
-        // Total VRAM is fixed for the life of the card, so read it once here
-        // rather than on every sample.
+        // Total VRAM and GTT are fixed for the life of the card, so read them
+        // once here rather than on every sample.
         if (root.gpuVramTotalPath !== "") gpuVramTotalFile.reload()
         if (root.gpuVramUsedPath !== "") gpuVramUsedFile.reload()
         if (root.gpuGttTotalPath !== "") gpuGttTotalFile.reload()

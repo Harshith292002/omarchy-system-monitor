@@ -210,7 +210,8 @@ function parseGpuPercent(raw) {
   return isFinite(value) && value >= 0 ? clamp(value, 0, 100) : -1
 }
 
-// VRAM counters are plain byte totals; -1 marks "not published by this card".
+// VRAM and GTT counters are plain byte totals; -1 marks "not published by
+// this card".
 function parseByteCount(raw) {
   var text = String(raw === undefined || raw === null ? "" : raw).trim()
   if (text === "") return -1

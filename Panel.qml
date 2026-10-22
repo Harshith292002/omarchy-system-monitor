@@ -345,14 +345,14 @@ Panel {
     return Math.max(0, Math.min(100, metrics.gpuVramUsed * 100 / metrics.gpuVramTotal))
   }
 
-  function gpuGttPercent() {
-    if (metrics.gpuGttTotal <= 0 || metrics.gpuGttUsed < 0) return -1
-    return Math.max(0, Math.min(100, metrics.gpuGttUsed * 100 / metrics.gpuGttTotal))
-  }
-
   function gpuVramDetail() {
     if (metrics.gpuVramTotal <= 0 || metrics.gpuVramUsed < 0) return "—"
     return formatPair(metrics.gpuVramUsed, metrics.gpuVramTotal)
+  }
+
+  function gpuGttPercent() {
+    if (metrics.gpuGttTotal <= 0 || metrics.gpuGttUsed < 0) return -1
+    return Math.max(0, Math.min(100, metrics.gpuGttUsed * 100 / metrics.gpuGttTotal))
   }
 
   function gpuGttDetail() {
@@ -701,7 +701,7 @@ Panel {
               width: root.gpuTileWidth(parent.width, parent.spacing)
               title: "GPU"
               value: root.percent(metrics.gpuPercent)
-              detail: root.hasGpuVram ? root.formatBytes(metrics.gpuVramUsed + (metrics.gpuGttUsed ? metrics.gpuGttUsed : 0)): "—"
+              detail: root.hasGpuVram ? root.formatBytes(metrics.gpuVramTotal) + " VRAM" : "—"
               meter: metrics.gpuPercent
               meterColor: root.levelColor(metrics.gpuPercent, root.warningThreshold, root.criticalThreshold)
               alarming: metrics.gpuPercent >= root.criticalThreshold
