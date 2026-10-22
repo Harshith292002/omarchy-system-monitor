@@ -259,7 +259,7 @@ test("manifest describes a public bar widget with configurable thresholds", () =
   const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"))
   assert.equal(manifest.schemaVersion, 1)
   assert.equal(manifest.id, "harshith.system-monitor")
-  assert.equal(manifest.version, "1.5.3")
+  assert.equal(manifest.version, "1.6.0")
   assert.equal(manifest.license, "MIT")
   assert.equal(manifest.homepage, "https://github.com/Harshith292002/omarchy-system-monitor")
   assert.equal(manifest.barWidget.defaultSection, "right")

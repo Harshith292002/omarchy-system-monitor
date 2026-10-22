@@ -23,7 +23,7 @@ background daemon or telemetry service.
   curve presets
 - Bar `Temp` mode: heatpipe watts on Asahi (`HEAT`), package °C elsewhere
   (`TEMP`); never selected by Adaptive
-- GPU utilization, temperature, and VRAM, with per-sensor vendor fallbacks
+- GPU utilization, temperature, VRAM, and GTT, with per-sensor vendor fallbacks
 - Two-minute CPU, memory, and GPU history with per-core utilization
 - Mirrored network throughput history on a shared scale
 - Automatic disk discovery with live read and write rates
@@ -73,7 +73,7 @@ pressure. Warning and critical colors follow the active Omarchy theme.
 | Disk throughput | `/proc/diskstats` and `/sys/class/block` |
 | CPU temperature | `/sys/class/hwmon` (`coretemp`, `k10temp`, or `zenpower`) |
 | Platform sensors (Apple Silicon/Asahi) | `/sys/class/hwmon` (`macsmc_hwmon` labelled temps and power rails) |
-| GPU load, temperature, and VRAM | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `hwmon`, `mem_info_vram_*`) |
+| GPU load, temperature, VRAM, and GTT | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `hwmon`, `mem_info_vram_*`, `mem_info_gtt_*`) |
 | Filesystem capacity | `df -P -k -l -T` |
 
 Temperature is shown when a supported package sensor is available. Apple
@@ -95,13 +95,13 @@ disappear as they are mounted. Nothing to configure.
 Each GPU tile is gated on its own sensor, because vendors expose different
 subsets:
 
-| Driver | Utilization | Temperature | VRAM |
-| --- | --- | --- | --- |
-| `amdgpu` | yes | yes (`temp1_input`) | yes |
-| `i915` (Intel, pre-Arc) | no | yes, kernel 6.12+ (`temp1_input`) | no |
-| `xe` (Intel, Arc/Meteor Lake/Lunar Lake+) | no | yes, kernel 6.15+ (`temp2_input` — `xe` has no `temp1`) | no |
-| `nouveau` | no | yes (`temp1_input`) | no |
-| NVIDIA proprietary | no | no | no |
+| Driver | Utilization | Temperature | VRAM | GTT |
+| --- | --- | --- | --- | --- |
+| `amdgpu` | yes | yes (`temp1_input`) | yes | yes |
+| `i915` (Intel, pre-Arc) | no | yes, kernel 6.12+ (`temp1_input`) | no | no |
+| `xe` (Intel, Arc/Meteor Lake/Lunar Lake+) | no | yes, kernel 6.15+ (`temp2_input` — `xe` has no `temp1`) | no | no |
+| `nouveau` | no | yes (`temp1_input`) | no | no |
+| NVIDIA proprietary | no | no | no | no |
 
 Only `amdgpu` publishes a device-wide utilization counter in sysfs. Intel
 exposes utilization through the PMU or per-client `fdinfo`, both of which need
@@ -115,6 +115,13 @@ than reported as idle, and NVIDIA is unsupported outright.
 A card with a temperature sensor but no utilization counter still gets a
 section, showing just the tiles it can fill. When nothing is readable, the
 panel keeps its original layout untouched.
+
+GTT is the system memory the GPU has mapped through its graphics
+translation table, alongside its own VRAM. Integrated graphics with a small
+VRAM carve-out lean on it heavily, so on those machines it is often the more
+telling of the two memory readings. A card that fills all four tiles
+(utilization, temperature, VRAM, and GTT) shows them as two rows of two, so
+each used/total figure stays readable.
 
 Cards are ranked so one publishing utilization wins outright, then by video
 memory, which picks the discrete adapter on hybrid systems without hard-coding
