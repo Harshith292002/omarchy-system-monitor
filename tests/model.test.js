@@ -75,6 +75,8 @@ test("discovery parser maps sensor probe output into runtime paths", () => {
     gpuTempPath: "",
     gpuVramUsedPath: "",
     gpuVramTotalPath: "",
+    gpuGttUsedPath: "",
+    gpuGttTotalPath: "",
     devices: ["nvme0n1", "sda"],
     platformSensors: [],
     fans: []
@@ -88,15 +90,32 @@ test("discovery parser captures gpu sensor paths alongside cpu and disks", () =>
     "gpu_busy\t/sys/class/drm/card1/device/gpu_busy_percent",
     "gpu_temp\t/sys/class/drm/card1/device/hwmon/hwmon1/temp1_input",
     "gpu_vram_used\t/sys/class/drm/card1/device/mem_info_vram_used",
-    "gpu_vram_total\t/sys/class/drm/card1/device/mem_info_vram_total"
+    "gpu_vram_total\t/sys/class/drm/card1/device/mem_info_vram_total",
+    "gpu_gtt_used\t/sys/class/drm/card1/device/mem_info_gtt_used",
+    "gpu_gtt_total\t/sys/class/drm/card1/device/mem_info_gtt_total"
   ].join("\n")
   const parsed = Model.parseDiscovery(raw)
   assert.equal(parsed.gpuBusyPath, "/sys/class/drm/card1/device/gpu_busy_percent")
   assert.equal(parsed.gpuTempPath, "/sys/class/drm/card1/device/hwmon/hwmon1/temp1_input")
   assert.equal(parsed.gpuVramTotalPath, "/sys/class/drm/card1/device/mem_info_vram_total")
+  assert.equal(parsed.gpuGttUsedPath, "/sys/class/drm/card1/device/mem_info_gtt_used")
+  assert.equal(parsed.gpuGttTotalPath, "/sys/class/drm/card1/device/mem_info_gtt_total")
   assert.deepEqual(parsed.devices, ["nvme0n1"])
   assert.deepEqual(parsed.platformSensors, [])
   assert.deepEqual(parsed.fans, [])
+})
+
+test("discovery parser maps gtt paths on their own, without vram counters", () => {
+  const raw = [
+    "gpu_busy\t/sys/class/drm/card0/device/gpu_busy_percent",
+    "gpu_gtt_used\t/sys/class/drm/card0/device/mem_info_gtt_used",
+    "gpu_gtt_total\t/sys/class/drm/card0/device/mem_info_gtt_total"
+  ].join("\n")
+  const parsed = Model.parseDiscovery(raw)
+  assert.equal(parsed.gpuVramUsedPath, "")
+  assert.equal(parsed.gpuVramTotalPath, "")
+  assert.equal(parsed.gpuGttUsedPath, "/sys/class/drm/card0/device/mem_info_gtt_used")
+  assert.equal(parsed.gpuGttTotalPath, "/sys/class/drm/card0/device/mem_info_gtt_total")
 })
 
 test("discovery parser captures macsmc fan records with bounds", () => {
@@ -163,6 +182,8 @@ test("gpu percent parser clamps to the 0-100 band and rejects missing readings",
 
 test("byte counter parser distinguishes zero from unavailable", () => {
   assert.equal(Model.parseByteCount("17095983104"), 17095983104)
+  // sysfs counters such as mem_info_gtt_total end in a newline.
+  assert.equal(Model.parseByteCount("17179869184\n"), 17179869184)
   assert.equal(Model.parseByteCount("0"), 0)
   assert.equal(Model.parseByteCount(""), -1)
   assert.equal(Model.parseByteCount("nope"), -1)
