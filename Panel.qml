@@ -233,8 +233,12 @@ Panel {
   readonly property bool hasGpuUsage: metrics.gpuPercent >= 0
   readonly property bool hasGpuTemperature: metrics.gpuTemperature >= 0
   readonly property bool hasGpuVram: metrics.gpuVramTotal > 0 && metrics.gpuVramUsed >= 0
+  readonly property bool hasGpuGtt: metrics.gpuGttTotal > 0 && metrics.gpuGttUsed >= 0
   readonly property bool hasGpu: hasGpuUsage || hasGpuTemperature
-  readonly property int gpuTileCount: (hasGpuUsage ? 1 : 0) + (hasGpuTemperature ? 1 : 0) + (hasGpuVram ? 1 : 0)
+  readonly property int gpuTileCount: (hasGpuUsage ? 1 : 0) + (hasGpuTemperature ? 1 : 0) + (hasGpuVram ? 1 : 0) + (hasGpuGtt ? 1 : 0)
+  // A quarter-panel tile clips its "used / total" detail, so a full set of
+  // four wraps into two rows of two; up to three still share one row.
+  readonly property int gpuTileColumns: gpuTileCount > 3 ? 2 : Math.max(1, gpuTileCount)
 
   function gpuTemperatureText() {
     return metrics.gpuTemperature >= 0 ? Math.round(metrics.gpuTemperature) + "°C" : "—"
@@ -332,11 +336,10 @@ Panel {
     ])
   }
 
-  // Row skips invisible children, so the divisor is the number of tiles that
-  // this card can actually fill.
+  // Grid skips invisible children, so the divisor is the number of tiles that
+  // this card can actually fill on one row.
   function gpuTileWidth(rowWidth, spacing) {
-    var count = Math.max(1, gpuTileCount)
-    return (rowWidth - spacing * (count - 1)) / count
+    return (rowWidth - spacing * (gpuTileColumns - 1)) / gpuTileColumns
   }
 
   function gpuVramPercent() {
@@ -347,6 +350,16 @@ Panel {
   function gpuVramDetail() {
     if (metrics.gpuVramTotal <= 0 || metrics.gpuVramUsed < 0) return "—"
     return formatPair(metrics.gpuVramUsed, metrics.gpuVramTotal)
+  }
+
+  function gpuGttPercent() {
+    if (metrics.gpuGttTotal <= 0 || metrics.gpuGttUsed < 0) return -1
+    return Math.max(0, Math.min(100, metrics.gpuGttUsed * 100 / metrics.gpuGttTotal))
+  }
+
+  function gpuGttDetail() {
+    if (metrics.gpuGttTotal <= 0 || metrics.gpuGttUsed < 0) return "—"
+    return formatPair(metrics.gpuGttUsed, metrics.gpuGttTotal)
   }
 
   // nvme0n1 → nvme0, mmcblk0 → mmc0; sda and friends are already short.
@@ -443,6 +456,7 @@ Panel {
       if (hasGpuUsage) gpu.push("GPU " + percent(metrics.gpuPercent))
       if (hasGpuTemperature) gpu.push((hasGpuUsage ? "" : "GPU ") + gpuTemperatureText())
       if (hasGpuVram) gpu.push("VRAM " + gpuVramDetail())
+      if (hasGpuGtt) gpu.push("GTT " + gpuGttDetail())
       lines.push(gpu.join(" · "))
     }
     if (metrics.fans.length > 0) {
@@ -571,10 +585,10 @@ Panel {
     contentWidth: panel.fittedContentWidth(Style.space(380))
     // Capped height, not a fixed one: fittedContentHeight still shrinks to fit
     // the screen and to the content itself, this just raises the ceiling so
-    // the added CapacityRow entries (one per auto-discovered disk), platform
-    // sensor rows, thermal and RPM charts, and the fans section aren't
-    // clipped.
-    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(600 + metrics.extraFilesystems.length * 40 + (metrics.hasPlatformSensors ? metrics.platformSensors.length * 40 + (metrics.fanMode === "custom" ? 400 : 300) : 0)))
+    // the GPU section's second tile row, the added CapacityRow entries (one
+    // per auto-discovered disk), platform sensor rows, thermal and RPM charts,
+    // and the fans section aren't clipped.
+    contentHeight: panel.fittedContentHeight(panelColumn.implicitHeight, Style.space(600 + (root.gpuTileCount > root.gpuTileColumns ? 88 : 0) + metrics.extraFilesystems.length * 40 + (metrics.hasPlatformSensors ? metrics.platformSensors.length * 40 + (metrics.fanMode === "custom" ? 400 : 300) : 0)))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -679,8 +693,9 @@ Panel {
           // ---------- GPU ----------
           // Hidden outright when no card publishes utilisation, so machines
           // without one keep the original three-tile layout.
-          Row {
+          Grid {
             width: parent.width
+            columns: root.gpuTileColumns
             spacing: Style.space(8)
             visible: root.hasGpu
 
@@ -715,6 +730,17 @@ Panel {
               meter: root.gpuVramPercent()
               meterColor: root.levelColor(root.gpuVramPercent(), root.warningThreshold, root.criticalThreshold)
               alarming: root.gpuVramPercent() >= root.criticalThreshold
+            }
+
+            StatTile {
+              visible: root.hasGpuGtt
+              width: root.gpuTileWidth(parent.width, parent.spacing)
+              title: "GTT"
+              value: root.percent(root.gpuGttPercent())
+              detail: root.gpuGttDetail()
+              meter: root.gpuGttPercent()
+              meterColor: root.levelColor(root.gpuGttPercent(), root.warningThreshold, root.criticalThreshold)
+              alarming: root.gpuGttPercent() >= root.criticalThreshold
             }
           }
 

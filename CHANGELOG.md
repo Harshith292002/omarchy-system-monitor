@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.6.0 - 2026-10-22
+
+- Add GPU GTT memory (#12). On `amdgpu`, a GTT tile next to VRAM shows how
+  much system memory the GPU has mapped (`mem_info_gtt_*`), and the tooltip's
+  GPU line includes it. Integrated graphics with a small VRAM carve-out lean
+  on GTT heavily, so there it is often the more telling memory reading
+- A card that fills all four GPU tiles (utilization, temperature, VRAM, and
+  GTT) shows them as two rows of two, so every used/total figure fits
+
 ## 1.5.3 - 2026-10-13
 
 - Fix unreadable dashboard text with a transparent bar over a light wallpaper

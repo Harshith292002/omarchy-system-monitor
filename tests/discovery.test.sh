@@ -10,7 +10,7 @@ trap 'rm -rf "$work"' EXIT
 
 failures=0
 
-card() { # <tree> <card> [busy] [vram_total] [temp]
+card() { # <tree> <card> [busy] [vram_total] [temp] [gtt_total]
   local dir="$work/$1/$2/device"
   mkdir -p "$dir"
   [[ -n "${3:-}" ]] && printf '%s\n' "$3" >"$dir/gpu_busy_percent"
@@ -21,6 +21,10 @@ card() { # <tree> <card> [busy] [vram_total] [temp]
   if [[ -n "${5:-}" ]]; then
     mkdir -p "$dir/hwmon/hwmon0"
     printf '%s\n' "$5" >"$dir/hwmon/hwmon0/temp1_input"
+  fi
+  if [[ -n "${6:-}" ]]; then
+    printf '%s\n' "$6" >"$dir/mem_info_gtt_total"
+    printf '%s\n' "1000" >"$dir/mem_info_gtt_used"
   fi
   return 0
 }
@@ -74,11 +78,13 @@ expect_key_absent() { # <name> <tree> <key>
 }
 
 echo "AMD hybrid (discrete + integrated) - picks the card with more VRAM"
-card amd card0 "100" "536870912"   "35000"
-card amd card1 "6"   "17095983104" "28000"
+card amd card0 "100" "536870912"   "35000" "17179869184"
+card amd card1 "6"   "17095983104" "28000" "17179869184"
 check "amd" amd gpu_busy  "card1"
 check "amd" amd gpu_temp  "card1"
 check "amd" amd gpu_vram_total "card1"
+check "amd" amd gpu_gtt_used  "card1/device/mem_info_gtt_used"
+check "amd" amd gpu_gtt_total "card1/device/mem_info_gtt_total"
 
 echo "Intel Arc (no busy counter anywhere) - still reports temperature"
 card intel card0 "" "" "40000"
@@ -86,6 +92,7 @@ card intel card1 "" "" "52000"
 check "intel" intel gpu_busy EMPTY
 check "intel" intel gpu_temp "card"
 check "intel" intel gpu_vram_total EMPTY
+check "intel" intel gpu_gtt_total EMPTY
 
 echo "Intel xe (package temp is temp2_input, there is no temp1) - still found"
 mkdir -p "$work/xe/card0/device/hwmon/hwmon0"
@@ -114,6 +121,19 @@ echo "AMD with less VRAM than a temperature-only card - utilisation still wins"
 card rank card0 ""   "34359738368" "60000"
 card rank card1 "3"  "8589934592"  "45000"
 check "rank" rank gpu_busy "card1"
+
+echo "GTT follows the chosen card - a losing card's GTT is not carried over"
+card gtt-reset card0 "40" "536870912"   "41000" "17179869184"
+card gtt-reset card1 "5"  "17095983104" "39000"
+check "gtt-reset" gtt-reset gpu_vram_total "card1"
+check "gtt-reset" gtt-reset gpu_gtt_used  EMPTY
+check "gtt-reset" gtt-reset gpu_gtt_total EMPTY
+
+echo "GTT without VRAM counters - each memory reading is probed on its own"
+card gtt-only card0 "5" "" "41000" "17179869184"
+check "gtt-only" gtt-only gpu_vram_total EMPTY
+check "gtt-only" gtt-only gpu_gtt_used  "card0/device/mem_info_gtt_used"
+check "gtt-only" gtt-only gpu_gtt_total "card0/device/mem_info_gtt_total"
 
 echo "coretemp - Package id 0 label wins over bare temp inputs"
 hwmon_tree coretemp hwmon0 coretemp

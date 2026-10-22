@@ -145,6 +145,8 @@ function parseDiscovery(raw) {
     gpuTempPath: "",
     gpuVramUsedPath: "",
     gpuVramTotalPath: "",
+    gpuGttUsedPath: "",
+    gpuGttTotalPath: "",
     devices: [],
     platformSensors: [],
     fans: []
@@ -160,6 +162,8 @@ function parseDiscovery(raw) {
     else if (key === "gpu_temp") result.gpuTempPath = value
     else if (key === "gpu_vram_used") result.gpuVramUsedPath = value
     else if (key === "gpu_vram_total") result.gpuVramTotalPath = value
+    else if (key === "gpu_gtt_used") result.gpuGttUsedPath = value
+    else if (key === "gpu_gtt_total") result.gpuGttTotalPath = value
     else if (key === "disk" && value !== "") result.devices.push(value)
     else if (key === "platform_sensor" && value !== "") {
       // "path\tkind\tlabel": the label is everything past the second field,
@@ -206,7 +210,8 @@ function parseGpuPercent(raw) {
   return isFinite(value) && value >= 0 ? clamp(value, 0, 100) : -1
 }
 
-// VRAM counters are plain byte totals; -1 marks "not published by this card".
+// VRAM and GTT counters are plain byte totals; -1 marks "not published by
+// this card".
 function parseByteCount(raw) {
   var text = String(raw === undefined || raw === null ? "" : raw).trim()
   if (text === "") return -1
