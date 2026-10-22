@@ -13,10 +13,16 @@ Panel {
   ipcTarget: "harshith.system-monitor"
   manageIpc: false
 
-  readonly property color foreground: bar ? bar.barForeground : Color.foreground
+  // Panel content sits on the popup surface (Color.popups.background), not on
+  // the bar. bar.barForeground follows the wallpaper when the bar is
+  // transparent, so on a light wallpaper (Kanagawa) it turns dark and vanishes
+  // against the dark popup. Pair text with the surface it is drawn on.
+  readonly property color foreground: Color.popups.text
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color accent: Color.accent
-  readonly property color muted: Qt.darker(foreground, 1.4)
+  // Secondary text: popup text faded toward the popup background, so it stays
+  // readable on light and dark themes alike (Qt.darker only dims dark themes).
+  readonly property color muted: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.7)
   readonly property color trackColor: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
   readonly property color chartGrid: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.18)
   // Second data hue. Stays inside the accent family so charted values never

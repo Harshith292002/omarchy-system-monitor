@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.5.3 - 2026-10-13
+
+- Fix unreadable dashboard text with a transparent bar over a light wallpaper
+  (Kanagawa, #10). Panel text now uses the popup palette (popups.text) that
+  matches the popup background instead of the wallpaper-adaptive bar
+  foreground, and secondary text fades the popup text instead of darkening it
+
 ## 1.5.2 - 2026-09-17
 
 - Apple Silicon SENSORS default list is shorter (battery hotspot, charge
