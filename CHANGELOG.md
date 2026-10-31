@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- Add NVIDIA utilization, temperature, and VRAM monitoring through one
+  continuous `nvidia-smi` process at the configured refresh interval. Select
+  adapters by capability and VRAM alongside sysfs GPUs, then sample by UUID.
+- Read NVIDIA VRAM capacity once and sample used VRAM only in the open panel.
+  Restart failed or stalled streams without overlapping processes.
+- Keep unsupported NVIDIA fields unavailable independently and show
+  memory-only GPU readings.
+
 ## 1.5.3 - 2026-10-13
 
 - Fix unreadable dashboard text with a transparent bar over a light wallpaper

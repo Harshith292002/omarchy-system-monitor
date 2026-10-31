@@ -73,7 +73,7 @@ pressure. Warning and critical colors follow the active Omarchy theme.
 | Disk throughput | `/proc/diskstats` and `/sys/class/block` |
 | CPU temperature | `/sys/class/hwmon` (`coretemp`, `k10temp`, or `zenpower`) |
 | Platform sensors (Apple Silicon/Asahi) | `/sys/class/hwmon` (`macsmc_hwmon` labelled temps and power rails) |
-| GPU load, temperature, and VRAM | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `hwmon`, `mem_info_vram_*`) |
+| GPU load, temperature, and VRAM | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `hwmon`, `mem_info_vram_*`), or `nvidia-smi` for NVIDIA |
 | Filesystem capacity | `df -P -k -l -T` |
 
 Temperature is shown when a supported package sensor is available. Apple
@@ -101,16 +101,36 @@ subsets:
 | `i915` (Intel, pre-Arc) | no | yes, kernel 6.12+ (`temp1_input`) | no |
 | `xe` (Intel, Arc/Meteor Lake/Lunar Lake+) | no | yes, kernel 6.15+ (`temp2_input` — `xe` has no `temp1`) | no |
 | `nouveau` | no | yes (`temp1_input`) | no |
-| NVIDIA proprietary | no | no | no |
+| NVIDIA (proprietary or open NVIDIA kernel modules) | yes (`nvidia-smi`) | yes (`nvidia-smi`) | yes (`nvidia-smi`) |
+
+The NVIDIA backend requires NVIDIA's driver stack with working `nvidia-smi`
+and NVML libraries. Both NVIDIA kernel-module flavors are expected to work:
+[NVIDIA documents identical user-space components for its proprietary and
+open kernel modules](https://download.nvidia.com/XFree86/Linux-x86_64/610.43.02/README/kernel_open.html).
+This compatibility expectation is not a claim that both flavors have been
+hardware-tested. Nouveau is a separate driver; it keeps the existing
+temperature-only sysfs support and does not gain utilization or VRAM readings
+through this backend.
 
 Only `amdgpu` publishes a device-wide utilization counter in sysfs. Intel
 exposes utilization through the PMU or per-client `fdinfo`, both of which need
-either elevated capabilities or per-process accounting. The NVIDIA proprietary
-driver doesn't register a `hwmon` device at all — not even for temperature —
-so every reading, utilization included, requires NVML (`nvidia-smi`). Reading
-any of these would mean spawning a helper process on every sample, which this
-plugin deliberately avoids, so a card that cannot be read is left out rather
-than reported as idle, and NVIDIA is unsupported outright.
+either elevated capabilities or per-process accounting. NVIDIA readings use
+`nvidia-smi`, supplied by `nvidia-utils` on Arch/Omarchy, with a working NVIDIA
+driver. No extra service or elevated privileges are needed. The plugin keeps
+one `nvidia-smi` process alive using continuous query mode throughout
+monitoring, rather than launching a new process for each sample. It uses the
+configured refresh interval (5 seconds with the panel closed, 2 seconds with
+the panel open by default), and restarts the stream when the cadence changes.
+Total VRAM is read once at discovery; used VRAM is queried only while the
+panel is open. A watchdog restarts a stream that misses its expected sample
+by 3 seconds, forcing termination after one further second if necessary.
+GPU utilization and temperature continue refreshing with the panel closed,
+matching sysfs monitoring and retaining history and temperature warnings.
+
+Missing tools, an unavailable driver, and unsupported readings (`N/A`) are
+treated as unavailable. A failed stream clears live NVIDIA readings and
+retries at the configured cadence. If NVIDIA discovery fails at startup,
+reload the plugin after restoring the driver to discover it again.
 
 A card with a temperature sensor but no utilization counter still gets a
 section, showing just the tiles it can fill. When nothing is readable, the
@@ -121,6 +141,8 @@ memory, which picks the discrete adapter on hybrid systems without hard-coding
 device identifiers. Two temperature-only cards in one machine — an Intel iGPU
 next to an Arc card, for instance — cannot currently be told apart, and the
 first is used.
+NVIDIA adapters participate in the same ranking, using their reported total
+VRAM, and the selected adapter is queried by UUID rather than its index.
 
 ## Fan control (Apple Silicon, optional)
 
@@ -216,6 +238,14 @@ omarchy plugin validate .
 node --test tests/model.test.js
 bash tests/discovery.test.sh
 ```
+
+With Quickshell installed, also run `bash tests/nvidia-runtime.test.sh` to
+exercise NVIDIA sampling, failure recovery, and timeouts in an isolated
+headless shell using simulated driver responses.
+
+After applying code changes to an installed plugin, run `omarchy restart
+shell` if the dashboard retains its previous behavior. The plugin watcher
+can report a reload while QML still uses cached components.
 
 Changes inside an installed plugin directory normally hot-reload. Restart the
 shell if a QML component remains cached:

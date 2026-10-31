@@ -125,10 +125,8 @@ done
 #                 numbers package temp starting at 2, there is no temp1 (see
 #                 Documentation/ABI/testing/sysfs-driver-intel-xe-hwmon)
 #   nouveau       hwmon temperature only (temp1_input)
-#   NVIDIA prop.  nothing readable via sysfs at all, not even temperature —
-#                 every reading requires NVML (nvidia-smi), which means a
-#                 helper process. Deliberately left unsupported rather than
-#                 spawning one per sample.
+#   NVIDIA       nvidia-smi supplies utilisation, temperature, and VRAM;
+#                 queried separately below because these are not sysfs files
 #
 # Cards are ranked so one publishing utilisation wins outright, then by video
 # memory. That keeps the discrete adapter on hybrid systems without hardcoding
@@ -189,6 +187,39 @@ for card in "$drm_root"/card*; do
   fi
 done
 
+# NVIDIA's driver does not publish the sysfs counters above. Discover its
+# adapters once, using UUIDs so samples stay on the same card even if indices
+# change. Rank alongside sysfs cards by capability, then VRAM (MiB -> bytes).
+# Missing tools, a sleeping/unavailable driver, or a hung query leave the sysfs
+# selection intact. Bound both discovery and subsequent samples.
+gpu_nvidia_uuid=""
+gpu_nvidia_vram_total=-1
+if command -v nvidia-smi >/dev/null 2>&1; then
+  if nvidia_cards=$(timeout -k 1s 3s nvidia-smi \
+    --query-gpu=uuid,memory.total --format=csv,noheader,nounits 2>/dev/null); then
+    while IFS=, read -r uuid memory; do
+      uuid="${uuid//[[:space:]]/}"
+      memory="${memory//[[:space:]]/}"
+      [[ "$uuid" =~ ^GPU-[[:xdigit:]-]+$ ]] || continue
+      vram=0
+      [[ "$memory" =~ ^[0-9]+$ ]] && vram=$((10#$memory * 1048576))
+      if (( best_rank < 2 )) || { (( best_rank == 2 )) && (( vram > best_vram )); }; then
+        best_rank=2
+        best_vram=$vram
+        gpu_nvidia_uuid="$uuid"
+        gpu_nvidia_vram_total=-1
+        [[ "$memory" =~ ^[0-9]+$ ]] && gpu_nvidia_vram_total=$vram
+        gpu_busy=""
+        gpu_temp=""
+        gpu_vram_used=""
+        gpu_vram_total=""
+      fi
+    done <<<"$nvidia_cards"
+  fi
+fi
+
+[[ -n "$gpu_nvidia_uuid" ]] && printf 'gpu_nvidia_uuid\t%s\n' "$gpu_nvidia_uuid"
+[[ -n "$gpu_nvidia_uuid" ]] && printf 'gpu_nvidia_vram_total\t%s\n' "$gpu_nvidia_vram_total"
 [[ -n "$gpu_busy" ]] && printf 'gpu_busy\t%s\n' "$gpu_busy"
 [[ -n "$gpu_temp" ]] && printf 'gpu_temp\t%s\n' "$gpu_temp"
 [[ -n "$gpu_vram_used" ]] && printf 'gpu_vram_used\t%s\n' "$gpu_vram_used"
