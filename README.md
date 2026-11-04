@@ -129,7 +129,8 @@ matching sysfs monitoring and retaining history and temperature warnings.
 
 Missing tools, an unavailable driver, and unsupported readings (`N/A`) are
 treated as unavailable. A failed stream clears live NVIDIA readings and
-retries at the configured cadence. If NVIDIA discovery fails at startup,
+retries at the configured cadence, backing off to once a minute while the
+driver keeps failing. If NVIDIA discovery fails at startup,
 reload the plugin after restoring the driver to discover it again.
 
 A card with a temperature sensor but no utilization counter still gets a
@@ -221,8 +222,9 @@ packages or files outside Omarchy's plugin configuration.
 ## Dependencies and privacy
 
 There are no third-party packages or services to install. The plugin uses
-`bash` and `df`, which are part of a standard Omarchy installation. `btop` is
-optional and is only launched when you request it.
+`bash`, `df`, and `stdbuf`, which are part of a standard Omarchy
+installation. On NVIDIA cards it also runs `nvidia-smi` from the driver's own
+`nvidia-utils`. `btop` is optional and is only launched when you request it.
 
 All monitoring stays on-device. The plugin does not use the network, write a
 metrics database, collect credentials, or send telemetry. Its only persistent
