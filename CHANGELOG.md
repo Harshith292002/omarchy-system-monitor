@@ -8,7 +8,8 @@ All notable changes to this project will be documented in this file.
   continuous `nvidia-smi` process at the configured refresh interval. Select
   adapters by capability and VRAM alongside sysfs GPUs, then sample by UUID.
 - Read NVIDIA VRAM capacity once and sample used VRAM only in the open panel.
-  Restart failed or stalled streams without overlapping processes.
+  Restart failed or stalled streams without overlapping processes, backing
+  off to once a minute while the driver keeps failing.
 - Keep unsupported NVIDIA fields unavailable independently and show
   memory-only GPU readings.
 

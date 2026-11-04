@@ -571,12 +571,18 @@ Item {
     property int refreshMs: 0
     property bool includeVram: false
     property bool stopping: false
+    // Consecutive launches that died or stalled without a row. A driver that
+    // keeps failing (e.g. a library/kernel-module mismatch after an upgrade)
+    // would otherwise be relaunched on every tick for as long as it is broken.
+    property bool stalled: false
+    property int failures: 0
     stdout: SplitParser {
       onRead: function(line) {
         if (nvidiaProc.stopping || nvidiaProc.uuid !== root.gpuNvidiaUuid) return
         // Loop mode can interleave driver diagnostics with CSV rows.
         if (String(line).split(",").length !== (nvidiaProc.includeVram ? 3 : 2)) return
         root.handleNvidiaGpu(line, nvidiaProc.includeVram)
+        nvidiaProc.failures = 0
         nvidiaWatchdog.restart()
       }
     }
@@ -585,8 +591,13 @@ Item {
       nvidiaWatchdog.stop()
       nvidiaKillTimer.stop()
       if (!stopping) root.handleNvidiaGpu("", includeVram)
-      nvidiaRetryTimer.interval = stopping ? 1 : root.gpuRefreshMs
+      if (!stopping || stalled) failures++
+      // A deliberate cadence/field restart is immediate; failures back off
+      // from the refresh interval, doubling up to once a minute.
+      nvidiaRetryTimer.interval = stopping && !stalled ? 1
+        : Math.min(60000, root.gpuRefreshMs * Math.pow(2, Math.min(failures - 1, 6)))
       stopping = false
+      stalled = false
       if (root.gpuNvidiaUuid !== "") nvidiaRetryTimer.restart()
     }
   }
@@ -601,6 +612,7 @@ Item {
     interval: nvidiaProc.refreshMs + 3000
     onTriggered: {
       root.handleNvidiaGpu("", nvidiaProc.includeVram)
+      nvidiaProc.stalled = true
       root.stopNvidiaMonitor()
     }
   }

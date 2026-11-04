@@ -25,6 +25,11 @@ if args == ["--query-gpu=uuid,memory.total", "--format=csv,noheader,nounits"]:
         sys.exit(9)
     print("GPU-aabb-1234, 8192", flush=True)
     sys.exit(0)
+if os.environ.get("OMARCHY_SYSMON_TEST_BROKEN"):
+    with open(state / "broken-launches", "a") as launches:
+        launches.write("x\n")
+    print("Failed to initialize NVML: Driver/library version mismatch", flush=True)
+    sys.exit(18)
 count_file = state / "count"
 count = int(count_file.read_text()) + 1 if count_file.exists() else 1
 expected = ["--id=GPU-aabb-1234", "--query-gpu=utilization.gpu,temperature.gpu" +
@@ -110,3 +115,27 @@ env PATH="$work/bin:$PATH" XDG_RUNTIME_DIR="$work/runtime" XDG_CACHE_HOME="$work
 cat "$work/amd-log"
 (( status == 0 )) || exit "$status"
 rg -q 'AMD continuous monitoring checks passed' "$work/amd-log"
+
+# A driver that discovers fine but fails every query (library/module mismatch
+# after an upgrade) must back off instead of relaunching on every tick: at a
+# 2 s cadence, 12 s allows launches at ~0, 2, 6 s (then 14 s), not six.
+cat >"$work/config/shell.qml" <<'EOF'
+import QtQuick
+import Quickshell
+import "." as Plugin
+
+ShellRoot {
+  Plugin.Metrics { settings: ({ openRefreshSec: 1, closedRefreshSec: 2 }) }
+  Timer { interval: 12000; running: true; onTriggered: Qt.quit() }
+}
+EOF
+status=0
+env PATH="$work/bin:$PATH" XDG_RUNTIME_DIR="$work/runtime" XDG_CACHE_HOME="$work/cache" \
+  QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=basic QT_QUICK_CONTROLS_STYLE=Basic \
+  OMARCHY_SYSMON_TEST_STATE="$work/state" OMARCHY_SYSMON_TEST_BROKEN=1 \
+  OMARCHY_SYSMON_DRM_ROOT="$work/no-cards" OMARCHY_SYSMON_HWMON_ROOT="$work/no-hwmon" \
+  timeout -k 1s 16s qs --no-color -p "$work/config" >"$work/broken-log" 2>&1 || status=$?
+(( status == 0 )) || { cat "$work/broken-log"; exit "$status"; }
+launches=$(wc -l <"$work/state/broken-launches")
+(( launches >= 2 && launches <= 4 )) || { echo "FAIL: broken driver relaunched $launches times in 12 s"; exit 1; }
+echo "Broken driver backoff passed: $launches launches in 12 s"
