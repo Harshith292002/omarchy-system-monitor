@@ -19,3 +19,5 @@ jobs:
         run: jq empty manifest.json
       - name: Run model tests
         run: node --test tests/model.test.js
+      - name: Run sensor discovery fixtures
+        run: bash tests/discovery.test.sh

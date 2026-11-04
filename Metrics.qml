@@ -8,7 +8,8 @@ Item {
 
   property var settings: ({})
   property bool panelOpen: false
-  readonly property string pluginPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/harshith.system-monitor"
+  readonly property int gpuRefreshMs: panelOpen ? openRefreshMs : closedRefreshMs
+  readonly property string pluginPath: decodeURIComponent(Qt.resolvedUrl(".").toString().replace(/^file:\/\//, ""))
   readonly property int closedRefreshMs: Math.max(2000, Number(settings.closedRefreshSec || 5) * 1000)
   readonly property int openRefreshMs: Math.max(1000, Number(settings.openRefreshSec || 2) * 1000)
   readonly property string configuredInterface: String(settings.networkInterface || "").trim()
@@ -47,6 +48,7 @@ Item {
   property string gpuTempPath: ""
   property string gpuVramUsedPath: ""
   property string gpuVramTotalPath: ""
+  property string gpuNvidiaUuid: ""
   property var diskDevices: []
   property double lastSampleMs: 0
   property double lastFilesystemRefreshMs: 0
@@ -276,6 +278,7 @@ Item {
     // VRAM only moves when the panel is open and a human is looking; polling
     // it on the closed cadence buys nothing and costs two sysfs reads.
     if (panelOpen && gpuVramUsedPath !== "") gpuVramUsedFile.reload()
+    syncNvidiaMonitor()
     for (var i = 0; i < sensorFileViews.count; i++) {
       var sensorFile = sensorFileViews.objectAt(i)
       if (sensorFile) sensorFile.sample()
@@ -521,6 +524,105 @@ Item {
     onLoadFailed: root.cpuTemperature = -1
   }
 
+  function handleNvidiaGpu(raw, includeVram) {
+    var value = Model.parseNvidiaGpu(raw, includeVram)
+    gpuPercent = value.percent
+    gpuTemperature = value.temperature
+    if (includeVram) gpuVramUsed = value.vramUsed
+    if (gpuPercent >= 0) gpuHistory = appendHistory(gpuHistory, Date.now(), gpuPercent)
+  }
+
+  function stopNvidiaMonitor() {
+    if (!nvidiaProc.running || nvidiaProc.stopping) return
+    nvidiaProc.stopping = true
+    nvidiaProc.signal(15)
+    nvidiaKillTimer.restart()
+  }
+
+  function syncNvidiaMonitor() {
+    if (gpuNvidiaUuid === "") {
+      nvidiaRetryTimer.stop()
+      stopNvidiaMonitor()
+      return
+    }
+    var refreshMs = panelOpen ? openRefreshMs : closedRefreshMs
+    if (nvidiaProc.running) {
+      if (nvidiaProc.uuid !== gpuNvidiaUuid || nvidiaProc.refreshMs !== refreshMs || nvidiaProc.includeVram !== panelOpen)
+        stopNvidiaMonitor()
+      return
+    }
+    if (nvidiaRetryTimer.running) return
+    nvidiaProc.uuid = gpuNvidiaUuid
+    nvidiaProc.refreshMs = refreshMs
+    nvidiaProc.includeVram = panelOpen
+    nvidiaProc.stopping = false
+    nvidiaProc.command = ["stdbuf", "-oL", "nvidia-smi", "--id=" + gpuNvidiaUuid,
+      "--query-gpu=utilization.gpu,temperature.gpu" + (panelOpen ? ",memory.used" : ""),
+      "--format=csv,noheader,nounits", "--loop-ms=" + refreshMs]
+    nvidiaProc.running = true
+    nvidiaWatchdog.restart()
+  }
+
+  // Keep one process alive throughout monitoring. Restart only for
+  // a cadence/field change or failure; capacity is read once at discovery.
+  Process {
+    id: nvidiaProc
+    property string uuid: ""
+    property int refreshMs: 0
+    property bool includeVram: false
+    property bool stopping: false
+    // Consecutive launches that died or stalled without a row. A driver that
+    // keeps failing (e.g. a library/kernel-module mismatch after an upgrade)
+    // would otherwise be relaunched on every tick for as long as it is broken.
+    property bool stalled: false
+    property int failures: 0
+    stdout: SplitParser {
+      onRead: function(line) {
+        if (nvidiaProc.stopping || nvidiaProc.uuid !== root.gpuNvidiaUuid) return
+        // Loop mode can interleave driver diagnostics with CSV rows.
+        if (String(line).split(",").length !== (nvidiaProc.includeVram ? 3 : 2)) return
+        root.handleNvidiaGpu(line, nvidiaProc.includeVram)
+        nvidiaProc.failures = 0
+        nvidiaWatchdog.restart()
+      }
+    }
+    stderr: SplitParser {}
+    onExited: {
+      nvidiaWatchdog.stop()
+      nvidiaKillTimer.stop()
+      if (!stopping) root.handleNvidiaGpu("", includeVram)
+      if (!stopping || stalled) failures++
+      // A deliberate cadence/field restart is immediate; failures back off
+      // from the refresh interval, doubling up to once a minute.
+      nvidiaRetryTimer.interval = stopping && !stalled ? 1
+        : Math.min(60000, root.gpuRefreshMs * Math.pow(2, Math.min(failures - 1, 6)))
+      stopping = false
+      stalled = false
+      if (root.gpuNvidiaUuid !== "") nvidiaRetryTimer.restart()
+    }
+  }
+
+  Timer {
+    id: nvidiaRetryTimer
+    onTriggered: root.syncNvidiaMonitor()
+  }
+
+  Timer {
+    id: nvidiaWatchdog
+    interval: nvidiaProc.refreshMs + 3000
+    onTriggered: {
+      root.handleNvidiaGpu("", nvidiaProc.includeVram)
+      nvidiaProc.stalled = true
+      root.stopNvidiaMonitor()
+    }
+  }
+
+  Timer {
+    id: nvidiaKillTimer
+    interval: 1000
+    onTriggered: if (nvidiaProc.running) nvidiaProc.signal(9)
+  }
+
   FileView {
     id: gpuBusyFile
     path: root.gpuBusyPath
@@ -656,6 +758,8 @@ Item {
         root.gpuTempPath = discovered.gpuTempPath
         root.gpuVramUsedPath = discovered.gpuVramUsedPath
         root.gpuVramTotalPath = discovered.gpuVramTotalPath
+        root.gpuNvidiaUuid = discovered.gpuNvidiaUuid
+        if (root.gpuNvidiaUuid !== "") root.gpuVramTotal = discovered.gpuNvidiaVramTotal
         root.diskDevices = discovered.devices
         root.diskSnapshot = null
         if (root.cpuTempPath !== "") temperatureFile.reload()
@@ -665,6 +769,7 @@ Item {
         // rather than on every sample.
         if (root.gpuVramTotalPath !== "") gpuVramTotalFile.reload()
         if (root.gpuVramUsedPath !== "") gpuVramUsedFile.reload()
+        root.syncNvidiaMonitor()
         diskFile.reload()
 
         // Same sensors, same objects: skip the reassignment when the set has

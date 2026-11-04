@@ -145,6 +145,8 @@ function parseDiscovery(raw) {
     gpuTempPath: "",
     gpuVramUsedPath: "",
     gpuVramTotalPath: "",
+    gpuNvidiaUuid: "",
+    gpuNvidiaVramTotal: -1,
     devices: [],
     platformSensors: [],
     fans: []
@@ -160,6 +162,8 @@ function parseDiscovery(raw) {
     else if (key === "gpu_temp") result.gpuTempPath = value
     else if (key === "gpu_vram_used") result.gpuVramUsedPath = value
     else if (key === "gpu_vram_total") result.gpuVramTotalPath = value
+    else if (key === "gpu_nvidia_uuid") result.gpuNvidiaUuid = value
+    else if (key === "gpu_nvidia_vram_total") result.gpuNvidiaVramTotal = parseByteCount(value)
     else if (key === "disk" && value !== "") result.devices.push(value)
     else if (key === "platform_sensor" && value !== "") {
       // "path\tkind\tlabel": the label is everything past the second field,
@@ -212,6 +216,24 @@ function parseByteCount(raw) {
   if (text === "") return -1
   var value = Number(text)
   return isFinite(value) && value >= 0 ? value : -1
+}
+
+// nvidia-smi CSV: utilisation (%), temperature (degrees C), and optionally
+// used VRAM (MiB). Unsupported fields stay independent: N/A must not hide good
+// readings or turn into a false idle value. Reject incomplete rows and diagnostics.
+function parseNvidiaGpu(raw, includeVram) {
+  var result = { percent: -1, temperature: -1, vramUsed: -1 }
+  var fields = String(raw || "").trim().split(",")
+  if (fields.length !== (includeVram ? 3 : 2)) return result
+  var values = []
+  for (var i = 0; i < fields.length; i++) {
+    var text = fields[i].trim()
+    values.push(/^[0-9]+(?:\.[0-9]+)?$/.test(text) ? parseByteCount(text) : -1)
+  }
+  result.percent = values[0] >= 0 ? clamp(values[0], 0, 100) : -1
+  result.temperature = values[1]
+  result.vramUsed = includeVram && values[2] >= 0 ? values[2] * 1048576 : -1
+  return result
 }
 
 // Platform sensors follow the hwmon ABI: temperatures in milli-degrees C,
@@ -313,6 +335,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseDiscovery: parseDiscovery,
     parseGpuPercent: parseGpuPercent,
     parseByteCount: parseByteCount,
+    parseNvidiaGpu: parseNvidiaGpu,
     parseSensorValue: parseSensorValue,
     parseFilesystems: parseFilesystems,
     peakValue: peakValue,

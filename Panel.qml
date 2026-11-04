@@ -233,7 +233,7 @@ Panel {
   readonly property bool hasGpuUsage: metrics.gpuPercent >= 0
   readonly property bool hasGpuTemperature: metrics.gpuTemperature >= 0
   readonly property bool hasGpuVram: metrics.gpuVramTotal > 0 && metrics.gpuVramUsed >= 0
-  readonly property bool hasGpu: hasGpuUsage || hasGpuTemperature
+  readonly property bool hasGpu: hasGpuUsage || hasGpuTemperature || hasGpuVram
   readonly property int gpuTileCount: (hasGpuUsage ? 1 : 0) + (hasGpuTemperature ? 1 : 0) + (hasGpuVram ? 1 : 0)
 
   function gpuTemperatureText() {

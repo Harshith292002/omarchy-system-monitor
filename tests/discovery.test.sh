@@ -8,6 +8,21 @@ script="$root/discover-sensors.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# Keep fixtures independent of the host's NVIDIA tools and hardware. Each
+# NVIDIA scenario supplies discovery output or a simulated driver failure.
+mkdir -p "$work/bin"
+cat >"$work/bin/nvidia-smi" <<'EOF'
+#!/bin/bash
+[[ "$*" == "--query-gpu=uuid,memory.total --format=csv,noheader,nounits" ]] || exit 2
+[[ -z "${MOCK_NVIDIA_DELAY:-}" ]] || sleep "$MOCK_NVIDIA_DELAY"
+printf '%s\n' "${MOCK_NVIDIA_CARDS:-}"
+exit "${MOCK_NVIDIA_EXIT:-0}"
+EOF
+chmod +x "$work/bin/nvidia-smi"
+export PATH="$work/bin:$PATH"
+export MOCK_NVIDIA_CARDS="" MOCK_NVIDIA_EXIT=0
+unset MOCK_NVIDIA_DELAY
+
 failures=0
 
 card() { # <tree> <card> [busy] [vram_total] [temp]
@@ -99,10 +114,63 @@ printf '30000\n' >"$work/temp-precedence/card0/device/hwmon/hwmon0/temp1_input"
 printf '55000\n' >"$work/temp-precedence/card0/device/hwmon/hwmon0/temp2_input"
 check "temp-precedence" temp-precedence gpu_temp "temp1_input"
 
-echo "NVIDIA proprietary (nothing readable) - reports nothing at all"
+echo "NVIDIA with unavailable driver - reports nothing at all"
 card nvidia card0 "" "" ""
 check "nvidia" nvidia gpu_busy EMPTY
 check "nvidia" nvidia gpu_temp EMPTY
+check "nvidia" nvidia gpu_nvidia_uuid EMPTY
+
+echo "NVIDIA proprietary - UUID selected, sysfs paths remain absent"
+export MOCK_NVIDIA_CARDS="GPU-aabb-1234, 8192"
+check "nvidia" nvidia gpu_nvidia_uuid GPU-aabb-1234
+check "nvidia" nvidia gpu_nvidia_vram_total 8589934592
+check "nvidia" nvidia gpu_busy EMPTY
+check "nvidia" nvidia gpu_temp EMPTY
+check "nvidia" nvidia gpu_vram_total EMPTY
+
+echo "Multiple NVIDIA cards - largest VRAM wins, regardless of enumeration"
+export MOCK_NVIDIA_CARDS=$'GPU-aabb-1234, 8192\nGPU-ccdd-5678, 24576'
+check "nvidia multi" nvidia gpu_nvidia_uuid GPU-ccdd-5678
+check "nvidia multi" nvidia gpu_nvidia_vram_total 25769803776
+
+echo "NVIDIA discrete adapter outranks integrated AMD and Intel"
+export MOCK_NVIDIA_CARDS="GPU-aabb-1234, 8192"
+card hybrid card0 "4" "536870912" "35000"
+check "nvidia hybrid" hybrid gpu_nvidia_uuid GPU-aabb-1234
+check "nvidia hybrid" hybrid gpu_busy EMPTY
+check "nvidia intel" intel gpu_nvidia_uuid GPU-aabb-1234
+check "nvidia intel" intel gpu_temp EMPTY
+
+echo "AMD with more VRAM wins over NVIDIA, preserving sysfs sampling"
+check "amd nvidia" amd gpu_nvidia_uuid EMPTY
+check "amd nvidia" amd gpu_nvidia_vram_total EMPTY
+check "amd nvidia" amd gpu_busy card1
+
+echo "Unsupported NVIDIA VRAM still permits selection over temperature-only cards"
+export MOCK_NVIDIA_CARDS="GPU-aabb-1234, [N/A]"
+check "nvidia no vram" intel gpu_nvidia_uuid GPU-aabb-1234
+check "nvidia no vram" intel gpu_nvidia_vram_total -1
+
+echo "Malformed discovery output is ignored"
+export MOCK_NVIDIA_CARDS="Not a GPU, 99999"
+check "nvidia malformed" nvidia gpu_nvidia_uuid EMPTY
+
+echo "Failed NVIDIA query discards partial stdout and preserves AMD fallback"
+export MOCK_NVIDIA_CARDS="GPU-aabb-1234, 24576" MOCK_NVIDIA_EXIT=9
+check "nvidia failed" nvidia gpu_nvidia_uuid EMPTY
+check "amd fallback" amd gpu_busy card1
+echo "Hung NVIDIA discovery times out and retains the sysfs fallback"
+export MOCK_NVIDIA_DELAY=10
+check "amd timeout fallback" amd gpu_busy card1
+unset MOCK_NVIDIA_DELAY
+export MOCK_NVIDIA_CARDS="" MOCK_NVIDIA_EXIT=0
+
+echo "nvidia-smi not installed - sysfs discovery still works"
+mkdir -p "$work/no-nvidia-bin"
+ln -s "$(command -v bash)" "$work/no-nvidia-bin/bash"
+ln -s "$(command -v grep)" "$work/no-nvidia-bin/grep"
+PATH="$work/no-nvidia-bin" check "no nvidia tool" amd gpu_busy card1
+PATH="$work/no-nvidia-bin" check "no nvidia tool" nvidia gpu_nvidia_uuid EMPTY
 
 echo "nouveau alongside AMD - utilisation outranks a temperature-only card"
 card mixed card0 ""    ""            "60000"

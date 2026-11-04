@@ -75,6 +75,8 @@ test("discovery parser maps sensor probe output into runtime paths", () => {
     gpuTempPath: "",
     gpuVramUsedPath: "",
     gpuVramTotalPath: "",
+    gpuNvidiaUuid: "",
+    gpuNvidiaVramTotal: -1,
     devices: ["nvme0n1", "sda"],
     platformSensors: [],
     fans: []
@@ -97,6 +99,38 @@ test("discovery parser captures gpu sensor paths alongside cpu and disks", () =>
   assert.deepEqual(parsed.devices, ["nvme0n1"])
   assert.deepEqual(parsed.platformSensors, [])
   assert.deepEqual(parsed.fans, [])
+})
+
+test("discovery parser captures a stable NVIDIA UUID", () => {
+  assert.equal(Model.parseDiscovery("gpu_nvidia_uuid\tGPU-aabb-1234\n").gpuNvidiaUuid, "GPU-aabb-1234")
+  assert.equal(Model.parseDiscovery("gpu_nvidia_vram_total\t8589934592\n").gpuNvidiaVramTotal, 8589934592)
+})
+
+test("NVIDIA samples convert MiB to bytes and keep zero readings", () => {
+  assert.deepEqual(Model.parseNvidiaGpu(" 37, 52, 1024.5\n", true), {
+    percent: 37, temperature: 52, vramUsed: 1024.5 * 1048576
+  })
+  assert.deepEqual(Model.parseNvidiaGpu("0, 0, 0", true), {
+    percent: 0, temperature: 0, vramUsed: 0
+  })
+  assert.equal(Model.parseNvidiaGpu("110, 50", false).percent, 100)
+  assert.deepEqual(Model.parseNvidiaGpu("5, 41", false), { percent: 5, temperature: 41, vramUsed: -1 })
+})
+
+test("unsupported NVIDIA fields leave other readings available", () => {
+  assert.deepEqual(Model.parseNvidiaGpu("[Not Supported], N/A, 256", true), {
+    percent: -1, temperature: -1, vramUsed: 256 * 1048576
+  })
+  assert.deepEqual(Model.parseNvidiaGpu("12, 42, [N/A]", true), {
+    percent: 12, temperature: 42, vramUsed: -1
+  })
+})
+
+test("failed, incomplete, or malformed NVIDIA samples never report idle", () => {
+  const missing = { percent: -1, temperature: -1, vramUsed: -1 }
+  for (const raw of [undefined, "", "NVIDIA-SMI has failed", "3, 40", "-1, NaN, Infinity", ", , "]) {
+    assert.deepEqual(Model.parseNvidiaGpu(raw, true), missing)
+  }
 })
 
 test("discovery parser captures macsmc fan records with bounds", () => {
