@@ -114,28 +114,56 @@ for block_path in /sys/class/block/*; do
   printf 'disk\t%s\n' "$device"
 done
 
-# GPU. Vendors expose different subsets, so each sensor is probed on its own
-# rather than gated behind one capability:
+# GPU. Two very different worlds:
 #
-#   amdgpu        gpu_busy_percent, hwmon temperature (temp1_input), mem_info_vram_*
-#   i915          hwmon temperature only (temp1_input); no device-wide busy
-#                 counter exists in sysfs, utilisation needs the PMU or
-#                 per-client fdinfo
-#   xe            hwmon temperature only, but as temp2_input: xe's hwmon ABI
-#                 numbers package temp starting at 2, there is no temp1 (see
-#                 Documentation/ABI/testing/sysfs-driver-intel-xe-hwmon)
-#   nouveau       hwmon temperature only (temp1_input)
+#   sysfs         amdgpu         gpu_busy_percent, hwmon temperature
+#                               (temp1_input), mem_info_vram_*
+#                 i915          hwmon temperature only (temp1_input); no
+#                               device-wide busy counter exists in sysfs,
+#                               utilisation needs the PMU or per-client fdinfo
+#                 xe            hwmon temperature only, but as temp2_input:
+#                               xe's hwmon ABI numbers package temp starting
+#                               at 2, there is no temp1 (see
+#                               Documentation/ABI/testing/sysfs-driver-intel-xe-hwmon)
+#                 nouveau       hwmon temperature only (temp1_input)
+#
 #   NVIDIA prop.  nothing readable via sysfs at all, not even temperature —
-#                 every reading requires NVML (nvidia-smi), which means a
-#                 helper process. Deliberately left unsupported rather than
-#                 spawning one per sample.
+#                 every reading requires NVML, whose userland face is
+#                 nvidia-smi. Reported as "gpu_nvml" so the panel can poll it
+#                 with one short-lived helper per sample instead of a FileView.
 #
-# Cards are ranked so one publishing utilisation wins outright, then by video
-# memory. That keeps the discrete adapter on hybrid systems without hardcoding
-# device IDs, and still reports a temperature-only card when it is all there is.
-# Overridable so the discovery logic can be exercised against fixture trees
-# that stand in for hardware this machine does not have.
+# Sysfs cards are ranked so one publishing utilisation wins outright, then by
+# video memory, which keeps the discrete adapter on hybrid systems without
+# hardcoding device IDs. A working nvidia-smi outranks both: on a hybrid pair
+# the integrated card reads 0% while the real work happens on the NVIDIA one,
+# so reporting the iGPU would be a lie rather than a preference. Both roots
+# are overridable so the discovery logic can be exercised against fixture
+# trees that stand in for hardware this machine does not have.
 drm_root="${OMARCHY_SYSMON_DRM_ROOT:-/sys/class/drm}"
+nvidia_smi="${OMARCHY_SYSMON_NVIDIA_SMI:-nvidia-smi}"
+
+nvidia_gpu=""
+if command -v "$nvidia_smi" >/dev/null 2>&1; then
+  # One line per card: "0, NVIDIA GeForce RTX 5060 Ti". `timeout` keeps a
+  # wedged driver from stalling discovery, and the first card is the one the
+  # panel shows — multi-GPU boxes still get a working reading, not a matrix.
+  while IFS= read -r line; do
+    [[ -n "${line//[[:space:]]/}" ]] || continue
+    nvidia_gpu="$line"
+    break
+  done < <(timeout 5 "$nvidia_smi" --query-gpu=index,name \
+             --format=csv,noheader 2>/dev/null)
+fi
+
+if [[ -n "$nvidia_gpu" ]]; then
+  nvidia_index="${nvidia_gpu%%,*}"
+  nvidia_index="${nvidia_index//[[:space:]]/}"
+  nvidia_name="${nvidia_gpu#*,}"
+  nvidia_name="${nvidia_name#"${nvidia_name%%[![:space:]]*}"}"
+  [[ -n "$nvidia_index" && "$nvidia_index" =~ ^[0-9]+$ ]] \
+    && printf 'gpu_nvml\t%s\t%s\n' "$nvidia_index" "$nvidia_name"
+  exit 0
+fi
 
 best_rank=-1
 best_vram=-1
