@@ -10,6 +10,11 @@ trap 'rm -rf "$work"' EXIT
 
 failures=0
 
+# The sysfs fixtures below must be hermetic: on a box with an NVIDIA card the
+# real nvidia-smi would answer first and mask every one of them. Stub it off
+# by default and point the override at a fixture script in the NVIDIA section.
+export OMARCHY_SYSMON_NVIDIA_SMI="$work/no-such-nvidia-smi"
+
 card() { # <tree> <card> [busy] [vram_total] [temp]
   local dir="$work/$1/$2/device"
   mkdir -p "$dir"
@@ -99,7 +104,7 @@ printf '30000\n' >"$work/temp-precedence/card0/device/hwmon/hwmon0/temp1_input"
 printf '55000\n' >"$work/temp-precedence/card0/device/hwmon/hwmon0/temp2_input"
 check "temp-precedence" temp-precedence gpu_temp "temp1_input"
 
-echo "NVIDIA proprietary (nothing readable) - reports nothing at all"
+echo "NVIDIA proprietary without nvidia-smi - nothing readable, nothing claimed"
 card nvidia card0 "" "" ""
 check "nvidia" nvidia gpu_busy EMPTY
 check "nvidia" nvidia gpu_temp EMPTY
@@ -156,6 +161,51 @@ expect_line "mixed coretemp still wins cpu_temp" mixed-hwmon \
   "$(printf 'cpu_temp\t%s/hwmon0/temp1_input' "$work/mixed-hwmon")"
 expect_line "mixed macsmc still lists its sensors" mixed-hwmon \
   "$(printf 'platform_sensor\t%s/hwmon3/temp1_input\ttemp\tWiFi/BT Module Temp' "$work/mixed-hwmon")"
+
+echo "NVIDIA via nvidia-smi - the NVML card is reported instead of the iGPU"
+card nvml-hybrid card0 "0" "536870912" ""
+fake_smi="$work/fake-nvidia-smi"
+printf '#!/bin/bash\nprintf "1, NVIDIA GeForce RTX 5060 Ti\\n"\n' >"$fake_smi"
+chmod +x "$fake_smi"
+
+probe_nvidia() { # <name> <tree> [smi]
+  OMARCHY_SYSMON_NVIDIA_SMI="${3:-$fake_smi}" \
+    OMARCHY_SYSMON_DRM_ROOT="$work/$2" bash "$script"
+}
+
+expect_nvml() { # <name> <tree> <exact-line>
+  local found=0 line
+  while IFS= read -r line; do
+    if [[ "$line" == "$3" ]]; then found=1; break; fi
+  done <<<"$(probe_nvidia "$1" "$2")"
+  if (( found )); then echo "  ok   $1"; else
+    echo "  FAIL $1: expected line '$3'"; failures=$((failures+1)); fi
+}
+
+expect_nvml_absent() { # <name> <tree> <smi>
+  local found=0 line
+  while IFS= read -r line; do
+    if [[ "$line" == "gpu_nvml"$'\t'* ]]; then found=1; break; fi
+  done <<<"$(probe_nvidia "$1" "$2" "$3")"
+  if (( found )); then echo "  FAIL $1: gpu_nvml unexpectedly emitted"; failures=$((failures+1)); else
+    echo "  ok   $1: gpu_nvml absent"; fi
+}
+
+expect_nvml "nvidia-smi reports index and card name" nvml-hybrid \
+  "$(printf 'gpu_nvml\t1\tNVIDIA GeForce RTX 5060 Ti')"
+
+# The iGPU still publishes gpu_busy_percent, but reporting it while the
+# discrete card works is the bug this covers: 0% from the AMD adapter.
+busy_lines="$(probe_nvidia nvml-hybrid nvml-hybrid | grep -c '^gpu_busy' || true)"
+if [[ "$busy_lines" == "0" ]]; then echo "  ok   nvidia: iGPU utilisation not reported"
+else echo "  FAIL nvidia: iGPU gpu_busy still emitted"; failures=$((failures+1)); fi
+
+echo "nvidia-smi that fails or prints nothing - falls back to the sysfs card"
+printf '#!/bin/bash\nexit 9\n' >"$fake_smi"
+expect_nvml_absent "failing nvidia-smi" nvml-hybrid "$fake_smi"
+check "failing nvidia-smi" nvml-hybrid gpu_busy "card0"
+printf '#!/bin/bash\nprintf "not an index\\n"\n' >"$fake_smi"
+expect_nvml_absent "unparseable nvidia-smi" nvml-hybrid "$fake_smi"
 
 echo
 if (( failures == 0 )); then echo "all discovery fixtures passed"; else

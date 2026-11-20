@@ -47,6 +47,10 @@ Item {
   property string gpuTempPath: ""
   property string gpuVramUsedPath: ""
   property string gpuVramTotalPath: ""
+  // NVIDIA's proprietary driver publishes none of the above: its readings
+  // come from NVML via nvidia-smi, one short-lived helper per sample.
+  property string gpuNvmlIndex: ""
+  property string gpuName: ""
   property var diskDevices: []
   property double lastSampleMs: 0
   property double lastFilesystemRefreshMs: 0
@@ -273,6 +277,11 @@ Item {
     if (cpuTempPath !== "") temperatureFile.reload()
     if (gpuBusyPath !== "") gpuBusyFile.reload()
     if (gpuTempPath !== "") gpuTemperatureFile.reload()
+    // NVML is the only interface a proprietary NVIDIA card offers, so its
+    // whole row is refreshed from one short-lived nvidia-smi (~40 ms) per
+    // tick. Skipped while the previous one is still running rather than
+    // queued: a wedged driver must not pile helpers up.
+    if (gpuNvmlIndex !== "" && !nvidiaProc.running) nvidiaProc.running = true
     // VRAM only moves when the panel is open and a human is looking; polling
     // it on the closed cadence buys nothing and costs two sysfs reads.
     if (panelOpen && gpuVramUsedPath !== "") gpuVramUsedFile.reload()
@@ -346,6 +355,18 @@ Item {
       }
     }
     networkSnapshot = { interfaceName: activeInterface, rx: current.rx, tx: current.tx, time: now }
+  }
+
+  function handleNvidiaSample(raw) {
+    var sample = Model.parseNvidiaSample(raw)
+    if (!sample) return
+    if (sample.percent >= 0) {
+      gpuPercent = sample.percent
+      gpuHistory = appendHistory(gpuHistory, Date.now(), sample.percent)
+    }
+    if (sample.temperature >= 0) gpuTemperature = sample.temperature
+    if (sample.vramUsed >= 0) gpuVramUsed = sample.vramUsed
+    if (sample.vramTotal >= 0) gpuVramTotal = sample.vramTotal
   }
 
   function handleDisk(raw) {
@@ -563,6 +584,26 @@ Item {
     onLoadFailed: root.gpuVramTotal = -1
   }
 
+  // NVIDIA proprietary driver: utilisation, temperature and VRAM all live
+  // behind NVML, and nvidia-smi is its userland face. One shot per sample,
+  // the way df is polled, so the panel cadence stays the only clock and no
+  // long-lived helper is left holding a GPU context. Output shape and the
+  // "[N/A]" cases are handled in Model.parseNvidiaSample.
+  Process {
+    id: nvidiaProc
+    command: [
+      "nvidia-smi",
+      "--query-gpu=utilization.gpu,temperature.gpu,memory.used,memory.total",
+      "--format=csv,noheader,nounits",
+      "-i", root.gpuNvmlIndex
+    ]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.handleNvidiaSample(text)
+    }
+    stderr: StdioCollector { waitForEnd: true }
+  }
+
   FileView {
     path: "/etc/hostname"
     watchChanges: true
@@ -656,6 +697,8 @@ Item {
         root.gpuTempPath = discovered.gpuTempPath
         root.gpuVramUsedPath = discovered.gpuVramUsedPath
         root.gpuVramTotalPath = discovered.gpuVramTotalPath
+        root.gpuNvmlIndex = discovered.gpuNvmlIndex
+        root.gpuName = discovered.gpuName
         root.diskDevices = discovered.devices
         root.diskSnapshot = null
         if (root.cpuTempPath !== "") temperatureFile.reload()
@@ -665,6 +708,9 @@ Item {
         // rather than on every sample.
         if (root.gpuVramTotalPath !== "") gpuVramTotalFile.reload()
         if (root.gpuVramUsedPath !== "") gpuVramUsedFile.reload()
+        // NVML-backed card: no paths to watch, so take the first reading now
+        // rather than waiting a full tick for one.
+        if (root.gpuNvmlIndex !== "" && !nvidiaProc.running) nvidiaProc.running = true
         diskFile.reload()
 
         // Same sensors, same objects: skip the reassignment when the set has

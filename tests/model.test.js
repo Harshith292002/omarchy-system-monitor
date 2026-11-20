@@ -75,6 +75,8 @@ test("discovery parser maps sensor probe output into runtime paths", () => {
     gpuTempPath: "",
     gpuVramUsedPath: "",
     gpuVramTotalPath: "",
+    gpuNvmlIndex: "",
+    gpuName: "",
     devices: ["nvme0n1", "sda"],
     platformSensors: [],
     fans: []
@@ -166,6 +168,47 @@ test("byte counter parser distinguishes zero from unavailable", () => {
   assert.equal(Model.parseByteCount("0"), 0)
   assert.equal(Model.parseByteCount(""), -1)
   assert.equal(Model.parseByteCount("nope"), -1)
+})
+
+test("discovery parser captures the NVML card index and name", () => {
+  const raw = [
+    "cpu_temp\t/sys/class/hwmon/hwmon2/temp1_input",
+    "gpu_nvml\t0\tNVIDIA GeForce RTX 5060 Ti",
+    "disk\tnvme0n1"
+  ].join("\n")
+  const parsed = Model.parseDiscovery(raw)
+  assert.equal(parsed.gpuNvmlIndex, "0")
+  assert.equal(parsed.gpuName, "NVIDIA GeForce RTX 5060 Ti")
+  // Nothing came from sysfs, so the FileViews stay unbound.
+  assert.equal(parsed.gpuBusyPath, "")
+  assert.equal(parsed.gpuTempPath, "")
+})
+
+test("nvidia-smi sample parses usage, temperature and MiB VRAM as bytes", () => {
+  const sample = Model.parseNvidiaSample("14, 49, 6341, 16311\n")
+  assert.equal(sample.percent, 14)
+  assert.equal(sample.temperature, 49)
+  assert.equal(sample.vramUsed, 6341 * 1024 * 1024)
+  assert.equal(sample.vramTotal, 16311 * 1024 * 1024)
+})
+
+test("nvidia-smi sample keeps the fields a driver does publish", () => {
+  // A laptop-mode card can refuse the memory query while still reporting load.
+  const sample = Model.parseNvidiaSample("[N/A], 47, [N/A], [N/A]")
+  assert.equal(sample.percent, -1)
+  assert.equal(sample.temperature, 47)
+  assert.equal(sample.vramUsed, -1)
+  assert.equal(sample.vramTotal, -1)
+})
+
+test("nvidia-smi sample rejects junk rather than claiming an idle card", () => {
+  assert.equal(Model.parseNvidiaSample(""), null)
+  assert.equal(Model.parseNvidiaSample("   "), null)
+  assert.equal(Model.parseNvidiaSample(null), null)
+  assert.equal(Model.parseNvidiaSample("[Not Supported]"), null)
+  assert.equal(Model.parseNvidiaSample("[N/A], [N/A], [N/A], [N/A]"), null)
+  // A wedged driver's stderr must not turn into a reading.
+  assert.equal(Model.parseNvidiaSample("NVIDIA-SMI has failed"), null)
 })
 
 test("filesystem discovery lists real local disks and skips pseudo mounts", () => {

@@ -73,7 +73,7 @@ pressure. Warning and critical colors follow the active Omarchy theme.
 | Disk throughput | `/proc/diskstats` and `/sys/class/block` |
 | CPU temperature | `/sys/class/hwmon` (`coretemp`, `k10temp`, or `zenpower`) |
 | Platform sensors (Apple Silicon/Asahi) | `/sys/class/hwmon` (`macsmc_hwmon` labelled temps and power rails) |
-| GPU load, temperature, and VRAM | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `hwmon`, `mem_info_vram_*`) |
+| GPU load, temperature, and VRAM | `/sys/class/drm/card*/device` (`gpu_busy_percent`, `hwmon`, `mem_info_vram_*`) or `nvidia-smi` (NVML) for proprietary NVIDIA |
 | Filesystem capacity | `df -P -k -l -T` |
 
 Temperature is shown when a supported package sensor is available. Apple
@@ -101,24 +101,27 @@ subsets:
 | `i915` (Intel, pre-Arc) | no | yes, kernel 6.12+ (`temp1_input`) | no |
 | `xe` (Intel, Arc/Meteor Lake/Lunar Lake+) | no | yes, kernel 6.15+ (`temp2_input` — `xe` has no `temp1`) | no |
 | `nouveau` | no | yes (`temp1_input`) | no |
-| NVIDIA proprietary | no | no | no |
+| NVIDIA proprietary | yes (via `nvidia-smi`) | yes (via `nvidia-smi`) | yes (via `nvidia-smi`) |
 
 Only `amdgpu` publishes a device-wide utilization counter in sysfs. Intel
 exposes utilization through the PMU or per-client `fdinfo`, both of which need
 either elevated capabilities or per-process accounting. The NVIDIA proprietary
 driver doesn't register a `hwmon` device at all — not even for temperature —
-so every reading, utilization included, requires NVML (`nvidia-smi`). Reading
-any of these would mean spawning a helper process on every sample, which this
-plugin deliberately avoids, so a card that cannot be read is left out rather
-than reported as idle, and NVIDIA is unsupported outright.
+so every reading, utilization included, requires NVML, whose userland face is
+`nvidia-smi`. When an NVIDIA card is detected and `nvidia-smi` works, the
+plugin polls it with one short-lived helper per sample (about 40 ms on the
+panel's 2–5 s cadence); a failed or absent `nvidia-smi` falls back to sysfs
+cards. A card that cannot be read at all is left out rather than reported as
+idle.
 
 A card with a temperature sensor but no utilization counter still gets a
 section, showing just the tiles it can fill. When nothing is readable, the
 panel keeps its original layout untouched.
 
-Cards are ranked so one publishing utilization wins outright, then by video
-memory, which picks the discrete adapter on hybrid systems without hard-coding
-device identifiers. Two temperature-only cards in one machine — an Intel iGPU
+Cards are ranked so a working `nvidia-smi` outranks any sysfs card outright,
+and among sysfs cards one publishing utilization wins, then by video memory,
+which picks the discrete adapter on hybrid systems without hard-coding device
+identifiers. Two temperature-only cards in one machine — an Intel iGPU
 next to an Arc card, for instance — cannot currently be told apart, and the
 first is used.
 

@@ -145,6 +145,8 @@ function parseDiscovery(raw) {
     gpuTempPath: "",
     gpuVramUsedPath: "",
     gpuVramTotalPath: "",
+    gpuNvmlIndex: "",
+    gpuName: "",
     devices: [],
     platformSensors: [],
     fans: []
@@ -160,7 +162,15 @@ function parseDiscovery(raw) {
     else if (key === "gpu_temp") result.gpuTempPath = value
     else if (key === "gpu_vram_used") result.gpuVramUsedPath = value
     else if (key === "gpu_vram_total") result.gpuVramTotalPath = value
-    else if (key === "disk" && value !== "") result.devices.push(value)
+    else if (key === "gpu_nvml" && value !== "") {
+      // "index\tname": NVML-backed card. The name is everything past the
+      // first field so a vendor string containing spaces survives intact.
+      var nvidia = value.split("\t")
+      if (nvidia[0] !== "") {
+        result.gpuNvmlIndex = nvidia[0]
+        result.gpuName = nvidia.slice(1).join("\t")
+      }
+    } else if (key === "disk" && value !== "") result.devices.push(value)
     else if (key === "platform_sensor" && value !== "") {
       // "path\tkind\tlabel": the label is everything past the second field,
       // so a label containing a tab survives intact.
@@ -212,6 +222,39 @@ function parseByteCount(raw) {
   if (text === "") return -1
   var value = Number(text)
   return isFinite(value) && value >= 0 ? value : -1
+}
+
+// nvidia-smi --format=csv,noheader,nounits prints one line per card:
+//
+//   14, 49, 6341, 16311
+//
+// (utilisation %, temperature °C, VRAM used MiB, VRAM total MiB). Fields a
+// driver does not publish arrive as "[N/A]" or "[Not Supported]", so each one
+// is validated on its own: a card that hides its memory still reports usage
+// and temperature instead of the whole sample being thrown away. Returns null
+// when nothing at all could be read.
+function parseNvidiaSample(raw) {
+  var lines = String(raw === undefined || raw === null ? "" : raw).trim().split("\n")
+  if (lines[0] === undefined || lines[0].trim() === "") return null
+  var fields = lines[0].split(",")
+  if (fields.length < 4) return null
+
+  function reading(field) {
+    var value = Number(String(field).trim())
+    return isFinite(value) && value >= 0 ? value : -1
+  }
+
+  var mebibyte = 1024 * 1024
+  var used = reading(fields[2])
+  var total = reading(fields[3])
+  var sample = {
+    percent: parseGpuPercent(fields[0]),
+    temperature: reading(fields[1]),
+    vramUsed: used >= 0 ? used * mebibyte : -1,
+    vramTotal: total >= 0 ? total * mebibyte : -1
+  }
+  if (sample.percent < 0 && sample.temperature < 0 && sample.vramTotal < 0) return null
+  return sample
 }
 
 // Platform sensors follow the hwmon ABI: temperatures in milli-degrees C,
@@ -312,6 +355,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseDisk: parseDisk,
     parseDiscovery: parseDiscovery,
     parseGpuPercent: parseGpuPercent,
+    parseNvidiaSample: parseNvidiaSample,
     parseByteCount: parseByteCount,
     parseSensorValue: parseSensorValue,
     parseFilesystems: parseFilesystems,

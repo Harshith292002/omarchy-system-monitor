@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- NVIDIA proprietary GPUs are now supported. When `nvidia-smi` is available,
+  discovery reports the NVML card (`gpu_nvml`) and it outranks any sysfs card,
+  so a hybrid pair no longer reports the idle integrated GPU while the
+  discrete card does the work. Utilization, temperature and VRAM come from
+  one short-lived `nvidia-smi` per sample on the existing panel cadence; a
+  failed or absent `nvidia-smi` falls back to the sysfs cards
+
 ## 1.5.3 - 2026-10-13
 
 - Fix unreadable dashboard text with a transparent bar over a light wallpaper
